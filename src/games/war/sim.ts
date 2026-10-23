@@ -24,6 +24,17 @@ export interface Unit { i: number; t: Team; k: number; x: number; hp: number; cd
 
 export interface QueueItem { k: number; by: string }
 
+/** Match stats (plain JSON). ageAt[a] = tick the team reached age a (-1 not yet; ageAt[0] = 0). */
+export interface TeamStats {
+  trained: number;
+  goldEarned: number; // passive income + kill rewards
+  goldSpent: number;
+  dmgUnits: number;
+  dmgBase: number;
+  specials: number;
+  ageAt: number[];
+}
+
 export interface TeamState {
   gold: number;
   xp: number;
@@ -38,13 +49,16 @@ export interface TeamState {
   spCd: number;
   kills: number;
   ai: number; // -1 humans, else AI level 0..2
+  st: TeamStats;
+  hpMark: number; // base HP thresholds passed: 0 none, 1 below 50%, 2 below 25%
+  alertAt: number; // tick of the last 'alert attack' event (throttle)
 }
 
 export interface Special { t: Team; age: number; at: number; done: number }
 
 /** seq: last command seq seen; -1 until the first input arrives (that one only sets the baseline, so a
  *  stale input from the previous match can never fire in a new one). */
-export interface WarPlayer extends PlayerInfo { team: Team; seq: number; connected: boolean }
+export interface WarPlayer extends PlayerInfo { team: Team; seq: number; connected: boolean; spent: number }
 
 /** Recent human commands (shown as "Ali: Okçu eğitiyor" to teammates). Capped at LOG_MAX. */
 export interface LogEntry { by: string; seq: number; team: Team; ok: boolean; text: string }
@@ -56,7 +70,7 @@ export interface WarState {
   nextId: number;
   mode: 'ai' | 'pvp';
   phase: 'playing' | 'over';
-  winner: Team | -1;
+  winner: Team | -1; // -1 = exact draw
   teams: [TeamState, TeamState];
   units: Unit[];
   sp: Special[];
@@ -74,7 +88,10 @@ export type WarEvent =
   | { type: 'special'; team: Team; age: number; by: string }
   | { type: 'impact'; team: Team; age: number; x: number }
   | { type: 'evolve'; team: Team; age: number; by: string }
-  | { type: 'over'; winner: Team };
+  | { type: 'alert'; team: Team; kind: 'attack' | 'hp50' | 'hp25' } // about `team`'s own base
+  | { type: 'over'; winner: Team | -1 };
+
+export const ALERT_EVERY = 5 * B.TICK; // 'base under attack' at most every 5 s
 
 export const dirOf = (t: Team) => (t === 0 ? 1 : -1);
 /** x of a team's base wall (units of the other team attack it here) */
@@ -93,13 +110,15 @@ function newTeam(ai: number): TeamState {
     gold: B.START_GOLD, xp: 0, age: 0, hp: B.AGES[0].baseHp, maxHp: B.AGES[0].baseHp,
     q: [], qt: 0, slots: B.START_SLOTS, tur: Array(B.MAX_SLOTS).fill(-1), tcd: Array(B.MAX_SLOTS).fill(0),
     spCd: B.SPECIAL_FIRST_CD, kills: 0, ai,
+    st: { trained: 0, goldEarned: 0, goldSpent: 0, dmgUnits: 0, dmgBase: 0, specials: 0, ageAt: B.AGES.map((_, i) => (i ? -1 : 0)) },
+    hpMark: 0, alertAt: -ALERT_EVERY,
   };
 }
 
 export function createGame(seed: number, players: PlayerInfo[], mode: string): WarState {
   const pvp = mode === 'pvp' && players.length >= 2;
   const list = players.slice(0, 2).map((p, i) => ({
-    id: p.id, name: p.name, color: p.color, team: (pvp ? i % 2 : 0) as Team, seq: -1, connected: true,
+    id: p.id, name: p.name, color: p.color, team: (pvp ? i % 2 : 0) as Team, seq: -1, connected: true, spent: 0,
   }));
   const humans = list.length;
   return {
@@ -120,6 +139,13 @@ export function setConnected(s: WarState, id: PlayerId, on: boolean): void {
   if (p) p.connected = on;
 }
 
+function spend(s: WarState, T: TeamState, by: string, n: number): void {
+  T.gold -= n;
+  T.st.goldSpent += n;
+  const p = s.players.find((q) => q.id === by);
+  if (p) p.spent += n;
+}
+
 const isInt = (v: unknown, lo: number, hi: number): v is number => Number.isInteger(v) && (v as number) >= lo && (v as number) <= hi;
 
 /** Executes one command for a team. Returns a Turkish description and whether it happened. */
@@ -133,7 +159,7 @@ export function applyCommand(s: WarState, team: Team, by: string, c: WarCommand,
       const u = B.UNITS[k];
       if (T.q.length >= B.QUEUE_MAX) return no('Sıra dolu');
       if (T.gold < u.cost) return no('Altın yetmiyor');
-      T.gold -= u.cost;
+      spend(s, T, by, u.cost);
       T.q.push({ k, by });
       return { ok: true, text: `${u.name} eğitiyor` };
     }
@@ -145,7 +171,8 @@ export function applyCommand(s: WarState, team: Team, by: string, c: WarCommand,
       const refund = old >= 0 ? Math.floor(B.TURRETS[old].cost * B.SELL_REFUND) : 0;
       if (old === k) return no('Zaten kurulu');
       if (T.gold + refund < B.TURRETS[k].cost) return no('Altın yetmiyor');
-      T.gold += refund - B.TURRETS[k].cost;
+      spend(s, T, by, B.TURRETS[k].cost);
+      T.gold += refund;
       T.tur[c.slot] = k;
       T.tcd[c.slot] = 0;
       return { ok: true, text: `${B.TURRETS[k].name} kurdu` };
@@ -161,13 +188,14 @@ export function applyCommand(s: WarState, team: Team, by: string, c: WarCommand,
       if (T.slots >= B.MAX_SLOTS) return no('Tüm yuvalar açık');
       const cost = B.SLOT_COSTS[T.slots - 1];
       if (T.gold < cost) return no('Altın yetmiyor');
-      T.gold -= cost;
+      spend(s, T, by, cost);
       T.slots++;
       return { ok: true, text: 'kule yuvası açtı' };
     }
     case 'special': {
       if (T.spCd > 0) return no('Özel güç hazır değil');
       T.spCd = B.SPECIAL_CD;
+      T.st.specials++;
       s.sp.push({ t: team, age: T.age, at: s.tick, done: 0 });
       ev.push({ type: 'special', team, age: T.age, by });
       return { ok: true, text: `${B.AGES[T.age].special.name}!` };
@@ -176,6 +204,7 @@ export function applyCommand(s: WarState, team: Team, by: string, c: WarCommand,
       if (T.age >= B.AGES.length - 1) return no('Son çağdasın');
       if (T.xp < B.AGES[T.age].xpToNext) return no('XP yetmiyor');
       T.age++;
+      T.st.ageAt[T.age] = s.tick;
       const max = B.AGES[T.age].baseHp;
       T.hp = Math.ceil((T.hp * max) / T.maxHp);
       T.maxHp = max;
@@ -191,6 +220,7 @@ function damageUnit(s: WarState, u: Unit, dmg: number, from: Team): void {
   const d = Math.min(dmg, u.hp);
   u.hp -= dmg;
   s.teams[from].xp += d * B.XP_PER_DMG;
+  s.teams[from].st.dmgUnits += d;
 }
 
 function damageArea(s: WarState, from: Team, x: number, r: number, dmg: number): void {
@@ -202,28 +232,35 @@ function damageBase(s: WarState, team: Team, dmg: number, from: Team, ev: WarEve
   const d = Math.min(dmg, T.hp);
   T.hp -= d;
   s.teams[from].xp += d * B.XP_PER_DMG;
+  s.teams[from].st.dmgBase += d;
   ev.push({ type: 'baseHit', team, dmg: d });
+  if (s.tick - T.alertAt >= ALERT_EVERY) {
+    T.alertAt = s.tick;
+    ev.push({ type: 'alert', team, kind: 'attack' });
+  }
 }
 
-/** Closest enemy unit (by distance along the lane) to x, or null. */
-function nearestEnemy(s: WarState, team: Team, x: number): Unit | null {
+/** Closest enemy unit (by distance along the lane) to x, or null. withDead: also units killed this tick. */
+function nearestEnemy(s: WarState, team: Team, x: number, withDead = false): Unit | null {
   let best: Unit | null = null;
   let bd = Infinity;
   for (const e of s.units) {
-    if (e.t === team || e.hp <= 0) continue;
+    if (e.t === team || (e.hp <= 0 && !withDead)) continue;
     const d = Math.abs(e.x - x);
     if (d < bd) [best, bd] = [e, d];
   }
   return best;
 }
 
+/** All units act on the tick-start state (a unit killed earlier in this loop still strikes back and
+ *  still blocks; moves are applied at the end), so team 0 iterating first gives it no edge. Deaths are removed at the end of step. */
 function stepUnits(s: WarState, ev: WarEvent[]): void {
+  const moves: [Unit, number][] = []; // applied after every unit decided (positions stay tick-start)
   for (const u of s.units) {
-    if (u.hp <= 0) continue;
     const def = B.UNITS[u.k];
     const d = dirOf(u.t);
     if (u.cd > 0) u.cd--;
-    const enemy = nearestEnemy(s, u.t, u.x);
+    const enemy = nearestEnemy(s, u.t, u.x, true);
     const egap = enemy ? (enemy.x - u.x) * d - (def.w + B.UNITS[enemy.k].w) / 2 : Infinity;
     const foe: Team = u.t === 0 ? 1 : 0;
     const wgap = (wallX(foe) - u.x) * d - def.w / 2;
@@ -250,14 +287,15 @@ function stepUnits(s: WarState, ev: WarEvent[]): void {
     // walk, but never into the ally ahead or through an enemy
     let move = Math.min(def.speed / B.TICK, egap, wgap);
     for (const a of s.units) {
-      if (a === u || a.t !== u.t || a.hp <= 0) continue;
+      if (a === u || a.t !== u.t) continue;
       const ahead = (a.x - u.x) * d;
       if (ahead > 0 || (ahead === 0 && a.i < u.i)) move = Math.min(move, ahead - (def.w + B.UNITS[a.k].w) / 2 - B.UNIT_GAP);
     }
-    if (move > 0) {
-      u.x += move * d;
-      u.s = 0;
-    } else u.s = 1;
+    moves.push([u, move > 0 ? move * d : 0]);
+  }
+  for (const [u, dx] of moves) {
+    u.x += dx;
+    u.s = dx ? 0 : 1;
   }
 }
 
@@ -316,6 +354,7 @@ function stepTraining(s: WarState, ev: WarEvent[]): void {
     T.q.shift();
     T.qt = 0;
     s.units.push({ i: s.nextId++, t: team, k, x, hp: def.hp, cd: 0, s: 0 });
+    T.st.trained++;
     ev.push({ type: 'spawn', team, k, x });
   }
 }
@@ -353,7 +392,9 @@ export function step(s: WarState, inputs: Record<PlayerId, WarInput>): WarEvent[
     const T = s.teams[team];
     if (T.spCd > 0) T.spCd--;
     if (s.tick % B.TICK !== 0) continue;
-    T.gold += Math.round(B.PASSIVE_GOLD[T.age] * humanIncomeMult(s, team));
+    const inc = Math.round(B.PASSIVE_GOLD[T.age] * humanIncomeMult(s, team));
+    T.gold += inc;
+    T.st.goldEarned += inc;
     if (s.tick > B.SUDDEN_DEATH) T.hp = Math.max(0, T.hp - Math.ceil(T.maxHp * B.SUDDEN_DEATH_DECAY));
   }
 
@@ -369,6 +410,7 @@ export function step(s: WarState, inputs: Record<PlayerId, WarInput>): WarEvent[
       const def = B.UNITS[u.k];
       const gold = Math.round(def.cost * B.KILL_GOLD_MULT);
       s.teams[killer].gold += gold;
+      s.teams[killer].st.goldEarned += gold;
       s.teams[killer].xp += def.cost * B.XP_KILL_MULT;
       s.teams[killer].kills++;
       ev.push({ type: 'death', team: u.t, k: u.k, x: u.x, gold });
@@ -376,12 +418,21 @@ export function step(s: WarState, inputs: Record<PlayerId, WarInput>): WarEvent[
     s.units = s.units.filter((u) => u.hp > 0);
   }
 
+  for (const team of [0, 1] as Team[]) {
+    const T = s.teams[team];
+    const mark = T.hp * 4 <= T.maxHp ? 2 : T.hp * 2 <= T.maxHp ? 1 : 0;
+    while (T.hpMark < mark && T.hp > 0) {
+      T.hpMark++;
+      ev.push({ type: 'alert', team, kind: T.hpMark === 1 ? 'hp50' : 'hp25' });
+    }
+  }
+
   const [a, b] = s.teams;
   if (a.hp <= 0 || b.hp <= 0 || s.tick >= B.MAX_TICKS) {
     s.phase = 'over';
     const ra = a.hp / a.maxHp;
     const rb = b.hp / b.maxHp;
-    s.winner = ra !== rb ? (ra > rb ? 0 : 1) : a.kills >= b.kills ? 0 : 1;
+    s.winner = ra !== rb ? (ra > rb ? 0 : 1) : a.kills !== b.kills ? (a.kills > b.kills ? 0 : 1) : -1;
     ev.push({ type: 'over', winner: s.winner });
   }
   return ev;

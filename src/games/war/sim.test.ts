@@ -280,3 +280,99 @@ describe('matches', () => {
     expect(wins.every(Boolean)).toBe(false);
   }, 120000);
 });
+
+describe('stats + alerts', () => {
+  it('counts trained, killed, gold earned/spent (team + issuer), damage, specials, age-up tick', () => {
+    seqs = {};
+    const s = synced(createGame(1, P(2), 'ai'));
+    s.teams[1].ai = -1; // keep the lane clean
+    const T = s.teams[0];
+    T.gold = 1000;
+    cmd(s, 'p0', { type: 'train', unit: 0 });
+    cmd(s, 'p1', { type: 'train', unit: 2 });
+    cmd(s, 'p1', { type: 'turret', slot: 0, kind: 0 });
+    expect(T.st.goldSpent).toBe(B.UNITS[0].cost + B.UNITS[2].cost + B.TURRETS[0].cost);
+    expect(s.players.map((p) => p.spent)).toEqual([B.UNITS[0].cost, B.UNITS[2].cost + B.TURRETS[0].cost]);
+    run(s, B.UNITS[0].train + B.UNITS[2].train + 30);
+    expect(T.st.trained).toBe(2);
+    expect(T.st.goldEarned).toBe(Math.round(B.PASSIVE_GOLD[0] * B.AI_MODE_HUMAN_INCOME) * Math.floor(s.tick / 60));
+    T.spCd = 0;
+    cmd(s, 'p0', { type: 'special' });
+    expect(T.st.specials).toBe(1);
+    T.xp = B.AGES[0].xpToNext;
+    cmd(s, 'p0', { type: 'evolve' });
+    expect(T.st.ageAt).toEqual([0, s.tick, -1, -1, -1]);
+    const e = unit(s, 1, 0, 1200);
+    e.cd = 1e9;
+    unit(s, 0, 2, 1150);
+    const earned = T.st.goldEarned;
+    const ev = run(s, 400);
+    expect(ev.some((x) => x.type === 'death' && x.team === 1)).toBe(true);
+    expect(T.kills).toBe(1);
+    expect(T.st.dmgUnits).toBe(B.UNITS[0].hp);
+    expect(T.st.goldEarned - earned).toBeGreaterThanOrEqual(Math.round(B.UNITS[0].cost * B.KILL_GOLD_MULT));
+    expect(JSON.parse(JSON.stringify(s))).toEqual(s);
+  });
+
+  it("'base under attack' at most once per 5 s; HP thresholds fire once each", () => {
+    const s = pvp();
+    s.teams[1].hp = s.teams[1].maxHp = 1e6;
+    unit(s, 0, 0, wallX(1) - 20).hp = 1e9;
+    const ev = run(s, 12 * 60);
+    const alerts = ev.filter((e) => e.type === 'alert');
+    expect(ev.filter((e) => e.type === 'baseHit').length).toBeGreaterThan(alerts.length);
+    expect(alerts).toHaveLength(3); // t≈0, 5 s, 10 s
+    expect(alerts.every((e) => e.type === 'alert' && e.team === 1 && e.kind === 'attack')).toBe(true);
+    expect(s.teams[0].st.dmgBase).toBe(1e6 - s.teams[1].hp);
+
+    const t = pvp();
+    const kinds = () => run(t, 1).filter((e) => e.type === 'alert').map((e) => (e as { kind: string }).kind);
+    t.teams[0].hp = 240; // < 50 %
+    expect(kinds()).toEqual(['hp50']);
+    expect(kinds()).toEqual([]);
+    t.teams[0].hp = 100; // < 25 %
+    expect(kinds()).toEqual(['hp25']);
+    expect(kinds()).toEqual([]);
+  });
+});
+
+describe('fairness', () => {
+  /** Mirrored script: identical rules for both sides (incl. turrets + slots). */
+  const script = (s: WarState, t: Team): WarCommand | null => {
+    const T = s.teams[t];
+    if (T.age < 4 && T.xp >= B.AGES[T.age].xpToNext) return { type: 'evolve' };
+    const empty = T.tur.findIndex((k, i) => i < T.slots && k < 0);
+    if (empty >= 0 && T.gold >= B.TURRETS[T.age * 3].cost) return { type: 'turret', slot: empty, kind: 0 };
+    if (empty < 0 && T.slots < B.MAX_SLOTS && T.gold >= B.SLOT_COSTS[T.slots - 1] * 2) return { type: 'buySlot' };
+    return greedy(s, t);
+  };
+
+  it('pvp is left/right symmetric: mirrored commands → mirrored state, draw', () => {
+    const s = pvp(7);
+    let seq = 0;
+    let turrets = 0;
+    while (s.phase === 'playing') {
+      const inp: Record<string, WarInput> = {};
+      if (s.tick % 30 === 0) {
+        seq++;
+        for (const t of [0, 1] as Team[]) inp[`p${t}`] = { cmd: script(s, t), seq };
+      }
+      step(s, inp);
+      turrets = Math.max(turrets, s.teams[0].tur.filter((k) => k >= 0).length);
+      if (s.tick % 60 === 0) {
+        const [a, b] = s.teams;
+        expect(a.hp).toBe(b.hp);
+        expect(a.gold).toBe(b.gold);
+        const xs = (t: Team) => s.units.filter((u) => u.t === t).map((u) => (t === 0 ? u.x : B.LANE_W - u.x)).sort((p, q) => p - q);
+        const d = xs(0).map((x, i) => Math.abs(x - (xs(1)[i] ?? -1e9)));
+        expect(Math.max(0, ...d)).toBeLessThan(1e-6);
+      }
+    }
+    const [a, b] = s.teams;
+    expect(a.st).toEqual(b.st);
+    expect(a.kills).toBe(b.kills);
+    expect(s.winner).toBe(-1);
+    expect(a.st.trained).toBeGreaterThan(10);
+    expect(turrets).toBeGreaterThan(0);
+  }, 60000);
+});

@@ -1,8 +1,7 @@
 // Çağlar Savaşı scene: scrolling side-view lane + HUD strip. Pure view of loop.state; all actions go
 // through WarInput commands ({ cmd, seq }) so host and clients run the same deterministic sim.
 import Phaser from 'phaser';
-import type { RoomSession, StartPayload } from '../../net';
-import { playNoise, playTone } from '../../ui/audio';
+import { recordMatch, type RoomSession, type StartPayload } from '../../net';
 import { cssColor, h, toast } from '../../ui/dom';
 import { showEndCard } from '../../ui/endcard';
 import { GameLoop, startPayload } from '../../ui/loop';
@@ -14,6 +13,7 @@ import {
   turretTexture, unitBox, unitTexture,
 } from './art';
 import { unitIndex, warSim, wallX, type Team, type WarCommand, type WarEvent, type WarInput, type WarState } from './sim';
+import { resetSfx, sfx } from './sound';
 
 const W = 960;
 const TOP_H = 46; // top HUD
@@ -34,32 +34,10 @@ const clock = (ticks: number) => {
 };
 const fmt = (n: number) => (n >= 100000 ? `${Math.floor(n / 1000)}k` : String(Math.floor(n)));
 
-// --- synthesized sfx ---------------------------------------------------------------------------
-let lastSfx: Record<string, number> = {};
-function throttled(key: string, ms: number, f: () => void) {
-  const now = performance.now();
-  if (now - (lastSfx[key] ?? 0) < ms) return;
-  lastSfx[key] = now;
-  f();
-}
-const sfx = {
-  melee: () => throttled('m', 70, () => playNoise({ dur: 0.06, vol: 0.25, filter: 1800 })),
-  shot: (age: number) =>
-    throttled('s', 70, () =>
-      age >= 4 ? playTone({ freq: 1400, slideTo: 300, dur: 0.12, type: 'sawtooth', vol: 0.08 })
-        : age >= 2 ? playNoise({ dur: 0.1, vol: 0.3, filter: 700 })
-          : playTone({ freq: 600, slideTo: 900, dur: 0.06, type: 'triangle', vol: 0.08 })),
-  turret: () => throttled('t', 90, () => playNoise({ dur: 0.08, vol: 0.22, filter: 500 })),
-  death: () => throttled('d', 80, () => playTone({ freq: 300, slideTo: 90, dur: 0.22, type: 'square', vol: 0.08 })),
-  base: () => throttled('b', 160, () => playNoise({ dur: 0.18, vol: 0.35, filter: 220 })),
-  impact: () => throttled('i', 60, () => { playNoise({ dur: 0.35, vol: 0.45, filter: 160 }); playTone({ freq: 140, slideTo: 40, dur: 0.3, vol: 0.2 }); }),
-  special: () => [220, 330, 440].forEach((f, i) => playTone({ freq: f, slideTo: f * 1.5, dur: 0.3, type: 'sawtooth', vol: 0.12, delay: i * 0.08 })),
-  evolve: () => [392, 523, 659, 784, 1047].forEach((f, i) => playTone({ freq: f, dur: 0.18, type: 'square', vol: 0.12, delay: i * 0.09 })),
-  click: () => playTone({ freq: 900, dur: 0.04, type: 'triangle', vol: 0.12 }),
-  deny: () => playTone({ freq: 200, slideTo: 140, dur: 0.15, type: 'square', vol: 0.12 }),
-  win: () => [523, 659, 784, 1047].forEach((f, i) => playTone({ freq: f, dur: 0.25, type: 'triangle', vol: 0.25, delay: i * 0.12 })),
-  lose: () => [392, 330, 262, 196].forEach((f, i) => playTone({ freq: f, dur: 0.3, type: 'triangle', vol: 0.25, delay: i * 0.2 })),
-};
+/** "Rakip Orta Çağ'a geçti!" */
+const AGE_DATIVE = ["Taş Devri'ne", "Orta Çağ'a", "Rönesans'a", "Modern Çağ'a", "Gelecek Çağ'a"];
+const TEAM_CSS = ['#8fbfff', '#ff8a8a'];
+const armyValue = (s: WarState, t: Team) => s.units.reduce((a, u) => a + (u.t === t ? B.UNITS[u.k].cost : 0), 0);
 
 interface Btn {
   box: Phaser.GameObjects.Rectangle;
@@ -79,7 +57,16 @@ export class WarScene extends Phaser.Scene {
   private input0: WarInput = { cmd: null, seq: 0 };
   private me: Team = 0;
   private lastTick = 0;
-  private lastAge: [number, number] = [0, 0];
+  /** highest values already announced per team (max-seen, so snapshot rollbacks never repeat a banner) */
+  private seenAge = [0, 0];
+  private seenSp = [0, 0];
+  private seenMark = [0, 0];
+  private seenAlert = [0, 0];
+  private bannerQ: { text: string; color: string }[] = [];
+  private bannerUntil = 0;
+  private armyF = 0.5;
+  private lastFlash = 0;
+  private armyText!: Phaser.GameObjects.Text;
   private seen = new Set<string>();
   private closeEnd: (() => void) | null = null;
   private ended = false;
@@ -136,14 +123,13 @@ export class WarScene extends Phaser.Scene {
     this.panelOpen = false;
     this.ended = false;
     this.closeEnd = null;
-    lastSfx = {};
+    resetSfx();
 
     this.loop = new GameLoop<WarState, WarInput, WarEvent>(session, warSim, {
       onHostLeft: () => {
         toast('Oda kurucusu ayrıldı');
         this.toMenu();
       },
-      onSnapshot: (prev, next) => this.synthesize(prev, next),
     });
     this.loop.start(payload);
 
@@ -202,8 +188,9 @@ export class WarScene extends Phaser.Scene {
     // right side of the top bar is taken by the global fullscreen/settings/mute buttons
     this.hpText = [fix(this.add.text(12, 6, '', txt(14))), fix(this.add.text(HP_X[1] - 8, 6, '', txt(14)).setOrigin(1, 0))];
     this.namesText = [fix(this.add.text(12, 26, '', txt(12, '#cfe0ff', 3))), fix(this.add.text(HP_X[1] - 8, 26, '', txt(12, '#ffd0d0', 3)).setOrigin(1, 0))];
-    this.timeText = fix(this.add.text(380, 8, '', txt(20, '#ffd23f')).setOrigin(0.5, 0));
-    this.banner = fix(this.add.text(W / 2, 170, '', txt(40, '#ffd23f', 8)).setOrigin(0.5).setAlpha(0));
+    this.timeText = fix(this.add.text(384, 2, '', txt(18, '#ffd23f')).setOrigin(0.5, 0));
+    this.banner = fix(this.add.text(W / 2, 112, '', txt(30, '#ffd23f', 7)).setOrigin(0.5).setAlpha(0));
+    this.armyText = fix(this.add.text(384, 23, '', txt(10, '#cfd3ff', 3)).setOrigin(0.5, 0));
     // minimap click → jump the camera there
     const zone = this.add.zone(0, MINI_Y, W, MINI_H + 4).setOrigin(0).setScrollFactor(0).setDepth(43).setInteractive();
     zone.on('pointerdown', (p: Phaser.Input.Pointer) => {
@@ -350,23 +337,19 @@ export class WarScene extends Phaser.Scene {
     this.closeEnd = null;
     this.ended = false;
     this.me = s.players.find((p) => p.id === this.loop.selfId)?.team ?? 0;
-    this.lastAge = [s.teams[0].age, s.teams[1].age];
+    this.seenAge = s.teams.map((T) => T.age);
+    this.seenSp = s.teams.map((T) => T.st.specials);
+    this.seenMark = s.teams.map((T) => T.hpMark);
+    this.seenAlert = s.teams.map((T) => T.alertAt);
+    this.bannerQ = [];
+    this.bannerUntil = 0;
+    this.armyF = 0.5;
     for (const img of this.units.values()) img.destroy();
     this.units.clear();
     this.seen = new Set(s.log.map((l) => `${l.by}:${l.seq}`));
     this.cameras.main.scrollX = this.me === 0 ? 0 : B.LANE_W - W;
     for (let i = 0; i < 4; i++) this.trainBtns[i].icon?.setTexture(unitTexture(this, i, this.me));
     this.showPanel(false);
-  }
-
-  /** Client: things that happened on the host between snapshots and left no local event. */
-  private synthesize(prev: WarState | null, next: WarState): WarEvent[] {
-    if (!prev) return [];
-    const out: WarEvent[] = [];
-    for (const t of [0, 1] as Team[]) {
-      if (next.teams[t].age > prev.teams[t].age && next.teams[t].age !== this.lastAge[t]) out.push({ type: 'evolve', team: t, age: next.teams[t].age, by: '' });
-    }
-    return out;
   }
 
   // --- frame ---------------------------------------------------------------------------------
@@ -383,7 +366,8 @@ export class WarScene extends Phaser.Scene {
     if (dx) cam.scrollX += dx * delta * 0.9;
     this.hills.tilePositionX = cam.scrollX * 0.3 * 2;
 
-    this.handleEvents(events, s);
+    this.handleEvents(events, s, time);
+    this.announce(s, time);
     this.drawWorld(s, time);
     this.drawHud(s, time);
     this.updateFeed(s, time);
@@ -395,26 +379,22 @@ export class WarScene extends Phaser.Scene {
     return x > c - 100 && x < c + W + 100;
   }
 
-  private handleEvents(events: WarEvent[], s: WarState): void {
+  private handleEvents(events: WarEvent[], s: WarState, time: number): void {
     for (const e of events) {
       switch (e.type) {
         case 'attack': {
           if (!this.visible(e.x)) break;
           const age = B.UNITS[e.k].age;
-          if (e.ranged) {
-            this.projectile(e.x + (e.team === 0 ? 14 : -14), GROUND_Y - 30, e.tx, GROUND_Y - 22, PROJ_BY_AGE[age], age <= 2 ? 30 : 4);
-            sfx.shot(age);
-          } else {
-            this.sparks.explode(3, e.tx, GROUND_Y - 24);
-            sfx.melee();
-          }
+          sfx.attack(age, B.UNITS[e.k].role, true);
+          if (e.ranged) this.projectile(e.x + (e.team === 0 ? 14 : -14), GROUND_Y - 30, e.tx, GROUND_Y - 22, PROJ_BY_AGE[age], age <= 2 ? 30 : 4);
+          else this.sparks.explode(3, e.tx, GROUND_Y - 24);
           break;
         }
         case 'turret': {
           const age = Math.floor(e.k / 3);
           const fx = this.turretX(e.team) + (e.team === 0 ? 14 : -14);
           this.projectile(fx, TURRET_Y0 - e.slot * TURRET_DY, e.tx, GROUND_Y - 22, PROJ_BY_AGE[age], age <= 1 ? 40 : 0);
-          if (this.visible(fx)) sfx.turret();
+          if (this.visible(fx)) sfx.turret(age);
           break;
         }
         case 'death': {
@@ -426,20 +406,19 @@ export class WarScene extends Phaser.Scene {
           break;
         }
         case 'baseHit':
-          if (this.visible(wallX(e.team))) sfx.base();
-          if (e.team === this.me) this.bases[e.team].setAlpha(0.75);
+          if (this.visible(wallX(e.team))) sfx.baseHit();
+          if (e.team === this.me) {
+            this.bases[e.team].setAlpha(0.75);
+            // heavy hits on my base: shake + red flash (throttled)
+            if (e.dmg >= s.teams[e.team].maxHp * 0.04 && time - this.lastFlash > 350) {
+              this.lastFlash = time;
+              this.cameras.main.shake(120, 0.006);
+              this.cameras.main.flash(120, 120, 0, 0, true);
+            }
+          }
           break;
         case 'impact':
-          this.impact(e.x, e.age);
-          break;
-        case 'special':
-          sfx.special();
-          this.showBanner(B.AGES[e.age].special.name + '!', e.team === this.me ? '#7dff6b' : '#ff6b6b');
-          break;
-        case 'evolve':
-          this.lastAge[e.team] = e.age;
-          sfx.evolve();
-          this.showBanner(`${e.team === this.me ? 'Çağ atladın' : 'Rakip çağ atladı'}: ${B.AGES[e.age].name}`, e.team === this.me ? '#ffd23f' : '#ff9a6b');
+          this.impact(e.x, e.age, time);
           break;
         case 'cmd':
           if (e.by === this.loop.selfId && !e.ok) sfx.deny();
@@ -450,8 +429,46 @@ export class WarScene extends Phaser.Scene {
           break;
       }
     }
-    // clients: age changes seen only via snapshots
-    for (const t of [0, 1] as Team[]) if (s.teams[t].age !== this.lastAge[t]) this.lastAge[t] = s.teams[t].age;
+  }
+
+  /** Banners + their cues from state diffs (same on host and clients, each from its own side). */
+  private announce(s: WarState, time: number): void {
+    const foe = s.mode === 'ai' ? 'Bilgisayar' : 'Rakip';
+    for (const t of [0, 1] as Team[]) {
+      const T = s.teams[t];
+      const mine = t === this.me;
+      const say = (text: string) => this.bannerQ.push({ text, color: TEAM_CSS[t] });
+      if (T.age > this.seenAge[t]) {
+        this.seenAge[t] = T.age;
+        if (mine) sfx.evolve();
+        else sfx.foeEvolve();
+        say(mine ? `Çağ atladın: ${B.AGES[T.age].name}!` : `${foe} ${AGE_DATIVE[T.age]} geçti!`);
+      }
+      if (T.st.specials > this.seenSp[t]) {
+        this.seenSp[t] = T.st.specials;
+        const name = B.AGES[T.age].special.name;
+        sfx.special(T.age);
+        say(mine ? `${name}!` : `${foe} ${name} kullandı!`);
+      }
+      if (T.hpMark > this.seenMark[t]) {
+        this.seenMark[t] = T.hpMark;
+        const pct = T.hpMark === 1 ? 50 : 25;
+        if (mine) sfx.alarm();
+        else sfx.good();
+        say(mine ? `Üs %${pct}!` : `${foe} üssü %${pct}!`);
+        this.seenAlert[t] = Math.max(this.seenAlert[t], T.alertAt);
+      } else if (mine && T.alertAt >= this.seenAlert[t] + 5 * 60) {
+        this.seenAlert[t] = T.alertAt;
+        sfx.alarm();
+        say('Üssün saldırı altında!');
+      }
+    }
+    if (this.bannerQ.length > 4) this.bannerQ.splice(0, this.bannerQ.length - 4);
+    if (this.bannerQ.length && time >= this.bannerUntil) {
+      const b = this.bannerQ.shift()!;
+      this.showBanner(b.text, b.color);
+      this.bannerUntil = time + (this.bannerQ.length ? 1100 : 600);
+    }
   }
 
   private projectile(x0: number, y0: number, x1: number, y1: number, kind: (typeof PROJ_BY_AGE)[number], arc: number): void {
@@ -472,7 +489,7 @@ export class WarScene extends Phaser.Scene {
     });
   }
 
-  private impact(x: number, age: number): void {
+  private impact(x: number, age: number, time: number): void {
     const colors = [0xff8a3a, 0xd9c08a, 0x444444, 0xffb03a, 0x7affff];
     if (age === 4) {
       const beam = this.add.rectangle(x, 0, 14, GROUND_Y, 0x7affff, 0.8).setOrigin(0.5, 0).setDepth(14);
@@ -487,8 +504,12 @@ export class WarScene extends Phaser.Scene {
     this.tweens.add({ targets: boom, scale: B.AGES[age].special.radius / 10, alpha: 0, duration: 320, onComplete: () => boom.destroy() });
     this.sparks.explode(6, x, GROUND_Y - 10);
     if (this.visible(x)) {
-      sfx.impact();
+      sfx.impact(age);
       if (age !== 1) this.cameras.main.shake(90, 0.004);
+      if (time - this.lastFlash > 400) {
+        this.lastFlash = time;
+        this.cameras.main.flash(90, 255, 230, 180, true);
+      }
     }
   }
 
@@ -501,7 +522,7 @@ export class WarScene extends Phaser.Scene {
     this.banner.setText(text).setColor(color).setAlpha(1).setScale(0.6);
     this.tweens.killTweensOf(this.banner);
     this.tweens.add({ targets: this.banner, scale: 1, duration: 220, ease: 'Back.easeOut' });
-    this.tweens.add({ targets: this.banner, alpha: 0, delay: 1600, duration: 500 });
+    this.tweens.add({ targets: this.banner, alpha: 0, delay: 1300, duration: 400 });
   }
 
   private drawWorld(s: WarState, time: number): void {
@@ -570,8 +591,18 @@ export class WarScene extends Phaser.Scene {
       const who = t === this.me ? 'Sen' : s.mode === 'ai' ? 'Bilgisayar' : 'Rakip';
       this.hpText[t].setText(`${who} ${Math.ceil(T.hp)}`);
       const names = s.players.filter((p) => p.team === t).map((p) => p.name + (p.connected ? '' : ' (koptu)'));
-      this.namesText[t].setText(names.length ? names.join(', ') : 'Bilgisayar');
+      this.namesText[t].setText(`${names.length ? names.join(', ') : 'Bilgisayar'} · ${B.AGES[T.age].name}`);
     }
+    // momentum: share of army value (unit cost on the field), left team from the left
+    const [va, vb] = [armyValue(s, 0), armyValue(s, 1)];
+    this.armyF += ((va + vb ? va / (va + vb) : 0.5) - this.armyF) * 0.08;
+    const AX = 290;
+    const AW = 188;
+    g.fillStyle(0x000000, 0.7).fillRect(AX - 1, 37, AW + 2, 7);
+    g.fillStyle(TEAM_COLOR[0], 1).fillRect(AX, 38, AW * this.armyF, 5);
+    g.fillStyle(TEAM_COLOR[1], 1).fillRect(AX + AW * this.armyF, 38, AW * (1 - this.armyF), 5);
+    g.fillStyle(0xffffff, 0.8).fillRect(AX + AW / 2 - 0.5, 36, 1, 9);
+    this.armyText.setText(`Ordu ${fmt(va)} : ${fmt(vb)}`);
     this.timeText.setText(clock(s.tick) + (s.tick > B.SUDDEN_DEATH ? ' ☄ Kıyamet' : ''));
 
     // minimap
@@ -702,20 +733,66 @@ export class WarScene extends Phaser.Scene {
   private showEnd(s: WarState): void {
     this.ended = true;
     this.showPanel(false);
+    const draw = s.winner === -1;
     const won = s.winner === this.me;
     const side = (t: Team) => (s.mode === 'ai' ? (t === 0 ? 'Takımınız' : 'Bilgisayar') : s.players.find((p) => p.team === t)?.name ?? `Takım ${t + 1}`);
-    const body = h('div', { class: 'stats' },
-      h('div', {}, h('b', { text: clock(s.tick) }), 'Süre'),
-      h('div', {}, h('b', { text: String(s.teams[0].kills) }), `${side(0)} öldürdü`),
-      h('div', {}, h('b', { text: String(s.teams[1].kills) }), `${side(1)} öldürdü`),
+    const [a, b] = s.teams;
+    const ages = (t: Team) => s.teams[t].st.ageAt.map((at, i) => (i && at >= 0 ? `${B.AGES[i].name} ${clock(at)}` : '')).filter(Boolean).join(', ') || '—';
+    const rows: [string, string, string][] = [
+      ['Eğitilen birim', String(a.st.trained), String(b.st.trained)],
+      ['Öldürülen', String(a.kills), String(b.kills)],
+      ['Kazanılan altın', fmt(a.st.goldEarned), fmt(b.st.goldEarned)],
+      ['Harcanan altın', fmt(a.st.goldSpent), fmt(b.st.goldSpent)],
+      ['Birimlere hasar', fmt(a.st.dmgUnits), fmt(b.st.dmgUnits)],
+      ['Üsse hasar', fmt(a.st.dmgBase), fmt(b.st.dmgBase)],
+      ['Özel güç', String(a.st.specials), String(b.st.specials)],
+      ['Ulaşılan çağ', B.AGES[a.age].name, B.AGES[b.age].name],
+      ['Çağ atlama', ages(0), ages(1)],
+    ];
+    const cell = (text: string, style = '') => h('td', { text, style: `padding:3px 10px;${style}` });
+    const table = h('table', { style: 'margin:8px auto;border-collapse:collapse;font-size:14px' },
+      h('tr', {}, cell(`Süre ${clock(s.tick)}`, 'color:#ffd23f'), cell(side(0), `color:${TEAM_CSS[0]};font-weight:700`), cell(side(1), `color:${TEAM_CSS[1]};font-weight:700`)),
+      ...rows.map(([k, x, y]) => h('tr', {}, cell(k, 'opacity:.75;text-align:left'), cell(x), cell(y))),
     );
+    const body = h('div', {}, table);
+    // vs-AI with two humans: whoever ordered more spending is the player of the match
+    const team = s.players.filter((p) => p.team === 0);
+    const lines = [draw ? 'İki üs de aynı anda düştü.' : won ? 'Düşman üssü yıkıldı!' : 'Üssün yıkıldı…'];
+    if (s.mode === 'ai' && team.length === 2 && team[0].spent !== team[1].spent) {
+      const mvp = team[0].spent > team[1].spent ? team[0] : team[1];
+      lines.push(`Maçın oyuncusu: ${mvp.name} (${fmt(mvp.spent)} altın harcadı)`);
+    }
     this.closeEnd = showEndCard({
-      title: won ? 'Zafer!' : 'Yenilgi',
-      lines: [won ? 'Düşman üssü yıkıldı!' : 'Üssün yıkıldı…', `Ulaşılan çağ: ${B.AGES[s.teams[this.me].age].name}`],
+      title: draw ? 'Berabere' : won ? 'Zafer!' : 'Yenilgi',
+      lines,
       body,
       isHost: this.session.isHost,
       onRestart: () => this.session.startGame(startPayload(this.session, this.mode)),
       onMenu: () => this.toMenu(),
+    });
+    if (this.session.isHost) void this.record(s);
+  }
+
+  /** Host only, once per match (showEnd runs once per match). */
+  private async record(s: WarState): Promise<void> {
+    try {
+      await this.recordNow(s);
+    } catch (err) {
+      console.warn('recordMatch failed', err);
+    }
+  }
+
+  private recordNow(s: WarState): Promise<void> {
+    const names = s.players.map((p) => p.name);
+    const teamOf = (t: Team) => s.players.filter((p) => p.team === t).map((p) => p.name);
+    const per = (f: (t: Team) => string | number) => Object.fromEntries(s.players.map((p) => [p.name, f(p.team)]));
+    return recordMatch({
+      game: 'war',
+      mode: s.mode,
+      players: names,
+      winners: s.winner === -1 ? [] : teamOf(s.winner), // AI won → no human on team 1 → []
+      stats: { kills: per((t) => s.teams[t].kills), ageReached: per((t) => B.AGES[s.teams[t].age].name) },
+      durationS: s.tick / B.TICK,
     });
   }
 
