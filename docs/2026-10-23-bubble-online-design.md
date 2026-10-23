@@ -1,6 +1,6 @@
 # Bubble Online — design
 
-Private, non-commercial online co-op remake of the *Bubble Trouble 2* gameplay for 2–3 friends
+Private, non-commercial online co-op remake of the *Bubble Trouble 2* gameplay for 1–4 friends
 (Ankara + Konya), PC browser and phone. Original art/audio only (no ripped assets).
 
 ## Stack
@@ -43,10 +43,10 @@ export const roomApi: RoomApi;
 - Players don't collide with each other. Disconnected player (`connected=false`) is removed from play.
 
 ## Networking (host-authoritative)
-- Room code 4 chars from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`; channel `room:<CODE>`; presence key = player id, payload `{name,color,isHost}`. Max 3. Join fails if no host in presence after sync (ROOM_NOT_FOUND), 3 present (ROOM_FULL), or host presence `inGame=true` (GAME_STARTED).
-- Host: runs `step` at 60 Hz with latest input per player, broadcasts `snapshot` (full GameState) at 10 Hz.
-- Client: sends `input` on change + keepalive 1 s. Runs local `step` between snapshots for smoothness (prediction); on each snapshot replaces its state with the snapshot, but keeps its own player's x when within 24 u (avoid snapback jitter). SFX/particles from locally produced SimEvents.
-- Message budget (3 players): ~10 snapshot sends × 3 deliveries + inputs ≈ 40 msg/s < 100/s free limit.
+- Room code 4 chars from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`; channel `room:<CODE>`; presence key = player id, payload `{name,color,isHost}`. Max 4. Join fails if no host in presence after sync (ROOM_NOT_FOUND), 4 present (ROOM_FULL), or host presence `inGame=true` (GAME_STARTED).
+- Host: runs `step` at 60 Hz with latest input per player, broadcasts `snapshot` (full GameState) at 7.5 Hz (every 8 ticks).
+- Client: sends `input` on change + keepalive 3 s. Runs local `step` between snapshots for smoothness (prediction); on each snapshot replaces its state with the snapshot, but keeps its own player's x when within 24 u (avoid snapback jitter). SFX/particles from locally produced SimEvents.
+- Message budget (4 players): snapshots every 8 ticks (7.5 Hz) × 4 deliveries + inputs on change × 4 + keepalive 3 s ≈ 75 msg/s < 100/s free limit.
 - Host leaves → clients see "Oda kurucusu ayrıldı" and return to menu.
 
 ## Screens (Turkish UI)

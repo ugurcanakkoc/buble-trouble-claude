@@ -4,7 +4,7 @@
 export const TICK_RATE = 60; // fixed simulation steps per second
 export const WORLD_W = 960; // play area width (logical units)
 export const WORLD_H = 480; // play area height; floor is at y = WORLD_H, y grows downward
-export const MAX_PLAYERS = 3;
+export const MAX_PLAYERS = 4;
 
 export type PlayerId = string;
 
@@ -73,6 +73,8 @@ export interface Player {
   onLadder: boolean;
   invulnUntil: number; // tick
   connected: boolean;
+  fireHeld: boolean; // fire was held last tick (harpoons fire once per press)
+  nextFireTick: number; // gun cooldown
 }
 
 export type BlockKind = 'wall' | 'breakable' | 'ladder';

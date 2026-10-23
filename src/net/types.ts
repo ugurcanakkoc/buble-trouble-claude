@@ -24,14 +24,14 @@ export interface RoomSession {
 
   // host only
   startGame(payload: StartPayload): void;
-  sendSnapshot(state: GameState): void; // ~10 Hz
+  sendSnapshot(state: GameState): void; // ~7.5 Hz (every 8 ticks)
   onInput(cb: (playerId: PlayerId, input: InputState) => void): () => void;
 
   // everyone (host receives its own start via a local callback too)
   onStart(cb: (payload: StartPayload) => void): () => void;
 
   // clients only
-  sendInput(input: InputState): void; // call only when input changed (+ keepalive every 1s)
+  sendInput(input: InputState): void; // call only when input changed (+ keepalive every 3s)
   onSnapshot(cb: (state: GameState) => void): () => void;
   onHostLeft(cb: () => void): () => void;
 
