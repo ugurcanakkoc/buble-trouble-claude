@@ -34,7 +34,7 @@ function fakeSession(isHost: boolean, selfId = isHost ? 'h' : 'c') {
 function mkState(players: PlayerInfo[]): GameState {
   return {
     tick: 0, rng: 1, levelIndex: 0, phase: 'playing', phaseUntil: 0, timeLeftTicks: 6000, lives: 5,
-    freezeUntil: 0, nextId: 10, balls: [], projectiles: [], powerUps: [], blocks: [],
+    freezeUntil: 0, nextId: 10, balls: [], projectiles: [], powerUps: [], blocks: [], mode: 'classic', god: null,
     players: players.map((p, i) => ({
       ...p, x: 100 + i * 100, y: 480, facing: 1, weapon: 'harpoon', shield: false, score: 0,
       invulnUntil: 0, connected: true, fireHeld: false, nextFireTick: 0, trapped: false, combo: 1, comboUntil: 0,
@@ -61,6 +61,7 @@ const payload: StartPayload = {
   seed: 1,
   players: [{ id: 'h', name: 'h', color: 1 }, { id: 'c', name: 'c', color: 2 }],
   levelIndex: 0,
+  mode: 'classic',
 };
 
 describe('GameLoop host', () => {

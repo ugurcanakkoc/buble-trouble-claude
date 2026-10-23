@@ -28,7 +28,7 @@ export function applyPowerUp(s: GameState, p: Player, kind: PowerUpKind): void {
   }
 }
 
-export function updatePowerUps(s: GameState, events: SimEvent[]): void {
+export function updatePowerUps(s: GameState, fighters: Player[], events: SimEvent[]): void {
   const half = POWERUP_SIZE / 2;
   s.powerUps = s.powerUps.filter((u) => {
     if (u.vy > 0) {
@@ -41,8 +41,8 @@ export function updatePowerUps(s: GameState, events: SimEvent[]): void {
       if (u.y === floor - half) { u.vy = 0; u.expiresAt = s.tick + LIFETIME; }
     } else if (s.tick >= u.expiresAt) return false;
 
-    for (const p of s.players) {
-      if (!p.connected || p.trapped) continue;
+    for (const p of fighters) {
+      if (p.trapped) continue;
       if (Math.abs(p.x - u.x) < PLAYER_W / 2 + half && u.y + half > p.y - PLAYER_H && u.y - half < p.y) {
         applyPowerUp(s, p, u.kind);
         events.push({ type: 'powerup', kind: u.kind, playerId: p.id });

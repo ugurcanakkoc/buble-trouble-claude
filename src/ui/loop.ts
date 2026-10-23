@@ -1,6 +1,6 @@
 // Host/client game loop controller. No Phaser here: the scene feeds it frame deltas and the local
 // input, and reads `state` + the returned events. Sim functions are injected so tests can stub them.
-import { EMPTY_INPUT, type GameState, type InputState, type PlayerId, type PlayerInfo, type SimEvent } from '../sim';
+import { EMPTY_INPUT, type GameMode, type GameState, type InputState, type PlayerId, type PlayerInfo, type SimEvent } from '../sim';
 import type { RoomSession, StartPayload } from '../net';
 
 export const STEP_MS = 1000 / 60;
@@ -11,7 +11,7 @@ export const RECONCILE_X = 24;
 const NO_INPUT = EMPTY_INPUT;
 
 export interface SimFns {
-  createGame(seed: number, players: PlayerInfo[], levelIndex?: number): GameState;
+  createGame(seed: number, players: PlayerInfo[], levelIndex?: number, mode?: GameMode): GameState;
   step(state: GameState, inputs: Record<PlayerId, InputState>): SimEvent[];
 }
 
@@ -22,11 +22,12 @@ export function randomSeed(): number {
   return (Math.random() * 0x100000000) >>> 0;
 }
 
-export function startPayload(session: RoomSession, levelIndex = 0): StartPayload {
+export function startPayload(session: RoomSession, levelIndex = 0, mode: GameMode = 'classic'): StartPayload {
   return {
     seed: randomSeed(),
     players: session.players().map(({ id, name, color }) => ({ id, name, color })),
     levelIndex,
+    mode,
   };
 }
 
@@ -67,7 +68,7 @@ export class GameLoop {
   }
 
   start(p: StartPayload): void {
-    this.state = this.sim.createGame(p.seed, p.players, p.levelIndex);
+    this.state = this.sim.createGame(p.seed, p.players, p.levelIndex, p.mode);
     this.acc = 0;
     this.steps = 0;
     this.pending = [];

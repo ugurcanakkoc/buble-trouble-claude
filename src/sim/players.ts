@@ -1,4 +1,4 @@
-import type { GameState, InputState, Player } from './types';
+import type { InputState, Player } from './types';
 import { WORLD_H, WORLD_W } from './types';
 import { DT } from './geom';
 
@@ -14,11 +14,10 @@ export function movePlayer(p: Player, inp: InputState): void {
   p.x = Math.max(PLAYER_W / 2, Math.min(WORLD_W - PLAYER_W / 2, p.x + dir * SPEED * DT));
 }
 
-/** Spread connected players across the floor. */
-export function placePlayers(s: GameState): void {
-  const active = s.players.filter((p) => p.connected);
-  active.forEach((p, i) => {
-    p.x = (WORLD_W * (i + 1)) / (active.length + 1);
+/** Spread the given players across the floor. */
+export function placePlayers(players: Player[]): void {
+  players.forEach((p, i) => {
+    p.x = (WORLD_W * (i + 1)) / (players.length + 1);
     p.y = WORLD_H;
     p.facing = 1;
   });

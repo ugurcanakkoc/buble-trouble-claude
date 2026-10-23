@@ -91,6 +91,24 @@ export interface Block {
 
 export type Phase = 'ready' | 'playing' | 'levelComplete' | 'dying' | 'gameOver'; // endless: no victory
 
+export type GameMode = 'classic' | 'god' | 'rain';
+
+// God / rain mode controller. In 'god' a player is the god for one round each (order); in 'rain' an AI (godId '').
+export interface GodState {
+  godId: PlayerId; // '' in rain = AI
+  x: number; // cloud x
+  mana: number;
+  charge: number; // 0..3 size being charged, -1 idle
+  chargeStart: number; // tick charging started
+  nextDropTick: number; // drop cooldown
+  round: number; // 0-based
+  roundEndsTick: number; // god: tick the round timer runs out; rain: tick the run started
+  roundWins: Record<PlayerId, number>;
+  order: PlayerId[]; // god rotation
+  aiTargetX: number; // AI god only: where the cloud drifts to
+  aiTargetSize: number; // AI god only: size it saves mana for
+}
+
 export interface GameState {
   tick: number;
   rng: number; // seeded PRNG state (mulberry32), advanced only by sim
@@ -106,6 +124,8 @@ export interface GameState {
   powerUps: PowerUp[];
   players: Player[];
   blocks: Block[];
+  mode: GameMode;
+  god: GodState | null; // null in classic
 }
 
 export type SimEvent =
@@ -120,7 +140,10 @@ export type SimEvent =
   | { type: 'blockBreak'; x: number; y: number }
   | { type: 'levelStart'; levelIndex: number }
   | { type: 'levelComplete'; levelIndex: number }
-  | { type: 'gameOver' };
+  | { type: 'gameOver' }
+  | { type: 'godDrop'; x: number; size: BallSize }
+  | { type: 'roundEnd'; winner: 'god' | 'fighters'; round: number }
+  | { type: 'matchEnd'; roundWins: Record<PlayerId, number> };
 
 export interface LevelDef {
   name: string;
