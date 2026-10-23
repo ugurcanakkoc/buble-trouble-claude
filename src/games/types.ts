@@ -3,7 +3,7 @@
 // Full platform API (loop, touch, helpers): docs/platform-api.md
 import type { PlayerId, PlayerInfo } from '../sim/types';
 
-export type GameId = 'bubble' | 'war' | 'bomb';
+export type GameId = 'bubble' | 'war' | 'bomb' | 'mutfak' | 'paramedik';
 
 export interface ModeDef {
   id: string;

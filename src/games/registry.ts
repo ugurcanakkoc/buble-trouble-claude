@@ -1,5 +1,6 @@
-// All games on the platform. A game is playable once its GameDef + scene class are in READY;
-// the rest show on the picker as "yakında" (disabled) with their provisional defs below.
+// All games on the platform. The first three are imported explicitly; any other game is picked up
+// automatically from src/games/<id>/index.ts if it has a default export `{ def, scene }` (a GameModule),
+// so parallel teams can add games without touching this file.
 import type Phaser from 'phaser';
 import { BubbleScene, bubbleGame } from './bubble';
 import type { GameDef, GameId } from './types';
@@ -7,36 +8,27 @@ import { BombScene, bombGame } from './bomb';
 import { WarScene, warGame } from './war';
 
 type SceneClass = new () => Phaser.Scene;
+export interface GameModule {
+  def: GameDef;
+  scene: SceneClass;
+}
+
+const discovered = Object.values(
+  import.meta.glob<{ default?: GameModule }>('./*/index.ts', { eager: true }),
+)
+  .map((m) => m.default)
+  .filter((m): m is GameModule => !!m?.def && !!m.scene);
+
 const READY: [GameDef, SceneClass][] = [
   [bubbleGame, BubbleScene],
   [warGame, WarScene],
   [bombGame, BombScene],
+  ...discovered.map((m): [GameDef, SceneClass] => [m.def, m.scene]),
 ];
 
-const PROVISIONAL: GameDef[] = [
-  {
-    id: 'war', title: 'Çağlar Savaşı', tagline: 'Üssünü koru, çağ atla, rakibi yık!', icon: '⚔️',
-    minPlayers: 1, maxPlayers: 2, sceneKey: 'WarGame',
-    modes: [
-      { id: 'pvp', label: "1'e 1", desc: 'İki oyuncu karşı karşıya', minPlayers: 2 },
-      { id: 'ai', label: 'Bilgisayara karşı', desc: 'Bilgisayara karşı savaş', minPlayers: 1 },
-    ],
-  },
-  {
-    id: 'bomb', title: 'Bomba', tagline: 'Bombanı koy, kaç, son kalan kazanır!', icon: '💣',
-    minPlayers: 1, maxPlayers: 4, sceneKey: 'BombGame',
-    modes: [
-      { id: 'ffa', label: 'Herkes tek', desc: 'Herkes kendi için, boş yerleri botlar doldurur', minPlayers: 1 },
-      { id: 'team', label: 'Takım', desc: 'İki takım', minPlayers: 2 },
-    ],
-  },
-];
-
-const ready = new Set(READY.map(([d]) => d.id));
-/** Picker order: bubble, war, bomb. */
-export const GAMES: GameDef[] = (['bubble', 'war', 'bomb'] as GameId[]).map(
-  (id) => READY.find(([d]) => d.id === id)?.[0] ?? PROVISIONAL.find((d) => d.id === id)!,
-);
+/** Picker order: registration order. */
+export const GAMES: GameDef[] = READY.map(([d]) => d);
 export const GAME_SCENES: SceneClass[] = READY.map(([, s]) => s);
+const ready = new Set(GAMES.map((g) => g.id));
 export const isPlayable = (id: GameId) => ready.has(id);
 export const getGame = (id: GameId): GameDef => GAMES.find((g) => g.id === id) ?? GAMES[0];
