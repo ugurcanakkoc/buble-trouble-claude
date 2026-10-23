@@ -9,11 +9,12 @@ import { FONT } from './textures';
 export function mountNetMeter(
   scene: Phaser.Scene,
   loop: { snapshotStats(): { avg: number; max: number } | null },
-  session: Pick<RoomSession, 'isHost' | 'linkInfo'> | boolean, // boolean = isHost (no link info)
+  session: Pick<RoomSession, 'isHost' | 'linkInfo' | 'players'> | boolean, // boolean = isHost (no link info)
 ): Phaser.GameObjects.Text {
   const isHost = typeof session === 'boolean' ? session : session.isHost;
   const link = () => {
     if (typeof session === 'boolean') return '';
+    if (session.isHost && session.players().length < 2) return ''; // solo: no link to report
     const l = session.linkInfo();
     return l.mode === 'p2p' ? ` · P2P ${l.rttMs === null ? '…' : Math.round(l.rttMs) + 'ms'}` : l.mode === 'relay' ? ' · Sunucu' : ' · Bağlanıyor…';
   };

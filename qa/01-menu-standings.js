@@ -72,7 +72,7 @@ async (page) => {
         await sleep(1200);
         if (i === 0) await shot(p, '01-board-' + tag);
       }
-      await p.getByRole('button', { name: 'Kapat' }).click();
+      await p.getByRole('button', { name: 'Kapat', exact: true }).click();
       ck(tag + ' board closed', !(await p.locator('.board .board-card').isVisible()));
       await dropCtx(c);
     }

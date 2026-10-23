@@ -47,7 +47,7 @@ describe('arena', () => {
 describe('flames', () => {
   it('propagate in a cross with range and stop at pillars and walls', () => {
     const s = arena();
-    s.players.forEach((p) => (p.alive = false));
+    s.players.forEach((p) => ((p.alive = false), (p.bot = true))); // empty arena, no humans → no early sudden death
     bomb(s, 3, 1, 3);
     run(s, 1);
     for (const [c, r] of [[3, 1], [1, 1], [2, 1], [4, 1], [5, 1], [6, 1], [3, 2], [3, 3], [3, 4]]) expect(flameAt(s, c, r)).toBe(true);
@@ -406,5 +406,17 @@ describe('kill attribution & stats', () => {
     Object.assign(s.players[1], { kills: 3, deaths: 1 });
     Object.assign(s.players[2], { kills: 1, deaths: 0 });
     expect(mvp(s.players)?.id).toBe('p1');
+  });
+});
+
+describe('humans all out', () => {
+  it('starts sudden death right away so bots do not stall the round', () => {
+    const s = arena(1); // 1 human + 3 bots
+    s.timeLeft = B.roundTicks;
+    run(s, 1);
+    expect(s.timeLeft).toBeGreaterThan(0);
+    s.players.find((p) => !p.bot)!.alive = false;
+    run(s, 1);
+    expect(s.timeLeft).toBe(0);
   });
 });

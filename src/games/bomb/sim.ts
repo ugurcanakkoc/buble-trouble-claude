@@ -544,6 +544,8 @@ export function step(s: BombState, inputs: Record<PlayerId, BombInput>): BombEve
   for (const f of s.flames) f.t--;
   s.flames = s.flames.filter((f) => f.t > 0);
 
+  // every human is out: don't make them watch bots for minutes, close the arena now
+  if (s.timeLeft > 0 && s.players.some((p) => !p.bot) && !s.players.some((p) => p.alive && !p.bot)) s.timeLeft = 0;
   if (s.timeLeft > 0) s.timeLeft--;
   if (s.timeLeft === 0) suddenDeath(s, ev);
 
