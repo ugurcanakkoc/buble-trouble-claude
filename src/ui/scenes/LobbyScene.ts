@@ -3,6 +3,7 @@ import type { LobbyPlayer, RoomSession } from '../../net';
 import { getGame } from '../../games/registry';
 import type { ModeDef } from '../../games/types';
 import { cssColor, h, mount, toast } from '../dom';
+import { shareInvite } from '../invite';
 import { startPayload } from '../loop';
 import { addBackdrop } from './backdrop';
 
@@ -18,7 +19,7 @@ export class LobbyScene extends Phaser.Scene {
     const list = h('ul', { class: 'players' });
     const count = h('span', { class: 'count' });
     const start = h('button', { class: 'btn green big', text: 'Başlat' });
-    const copy = h('button', { class: 'btn ghost', text: 'Kopyala' });
+    const invite = h('button', { class: 'btn cyan', text: '📨 Davet linki gönder' });
     const leave = h('button', { class: 'btn ghost', text: 'Ayrıl' });
 
     // host-only mode picker (modes from the GameDef, gated by minPlayers)
@@ -54,14 +55,10 @@ export class LobbyScene extends Phaser.Scene {
     };
     render(session.players());
 
-    copy.onclick = async () => {
-      try {
-        await navigator.clipboard.writeText(session.code);
-        copy.textContent = 'Kopyalandı!';
-      } catch {
-        copy.textContent = session.code;
-      }
-      setTimeout(() => (copy.textContent = 'Kopyala'), 1500);
+    invite.onclick = async () => {
+      const r = await shareInvite(session.code, game.title);
+      if (r === 'copied') toast('Davet linki kopyalandı, arkadaşına yapıştır');
+      else if (r === 'failed') toast(`Oda kodu: ${session.code}`);
     };
     start.onclick = () => {
       start.disabled = true;
@@ -94,7 +91,7 @@ export class LobbyScene extends Phaser.Scene {
             h('div', { class: 'game-head' }, h('span', { text: game.icon }), h('b', { text: game.title })),
             h('div', { class: 'hint', text: 'Oda kodu' }),
             h('div', { class: 'code-big', text: session.code }),
-            copy,
+            invite,
             h('div', { class: 'hint players-head' }, h('span', { text: 'Oyuncular' }), count),
             list,
           ),

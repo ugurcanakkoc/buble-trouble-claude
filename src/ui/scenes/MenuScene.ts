@@ -3,6 +3,7 @@ import { roomApi, type JoinError } from '../../net';
 import { GAMES, getGame, isPlayable } from '../../games/registry';
 import type { GameDef, GameId } from '../../games/types';
 import { h, load, mount, save } from '../dom';
+import { clearInvite, readInvite } from '../invite';
 import { createBoardPanel } from '../leaderboard';
 import { addBackdrop } from './backdrop';
 
@@ -113,8 +114,11 @@ export class MenuScene extends Phaser.Scene {
     };
 
     code.addEventListener('input', () => (code.value = code.value.toUpperCase().replace(/[^A-Z0-9]/g, '')));
+    // Invite link (?oda=CODE): join straight away if we know the name, else ask for it first.
+    const invited = readInvite();
+    clearInvite();
     code.addEventListener('keydown', (e) => e.key === 'Enter' && join.click());
-    name.addEventListener('keydown', (e) => e.key === 'Enter' && create.click());
+    name.addEventListener('keydown', (e) => e.key === 'Enter' && (invited ? join : create).click());
 
     const board = createBoardPanel({ game: () => picked, user: () => name.value.trim() || load(NAME_KEY) || '' });
     const best = h('button', { class: 'btn ghost', text: '🏆 Skor Tablosu', onclick: () => board.open() });
@@ -144,5 +148,14 @@ export class MenuScene extends Phaser.Scene {
       unmount();
       unmountBoard();
     });
+
+    if (invited) {
+      code.value = invited;
+      if (name.value.trim()) void join.click();
+      else {
+        error.textContent = `Davet edildin! Adını yaz ve "Odaya Katıl"a bas (oda ${invited})`;
+        name.focus();
+      }
+    }
   }
 }

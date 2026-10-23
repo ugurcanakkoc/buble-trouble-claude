@@ -1,7 +1,6 @@
-// On-screen multi-touch controls for any game: one button group per side gutter.
-// DOM, fixed to the viewport bottom corners; while mounted, #app is narrowed to the space between
-// the gutters (widths measured from the groups) and Phaser refits. Sides swap via the
-// "Kontrolleri ters çevir" setting. Callers decide whether to mount (see dom.isTouch()).
+// On-screen multi-touch controls for any game: one button group per bottom corner, overlaid
+// semi-transparently on the full-size game. Sides swap via the "Kontrolleri ters çevir" setting.
+// Callers decide whether to mount (see dom.isTouch()).
 import { h } from './dom';
 import { controlsSwapped } from './settings';
 
@@ -74,21 +73,16 @@ export function mountTouchControls(spec: { left: TouchGroup; right: TouchGroup }
       sync(st);
     }
   };
-  const docStyle = document.documentElement.style;
   const layout = () => {
     const swap = controlsSwapped();
     const [l, r] = swap ? [rightEl, leftEl] : [leftEl, rightEl];
     l.className = l.className.replace(/ ?side-\w+/g, '') + ' side-l';
     r.className = r.className.replace(/ ?side-\w+/g, '') + ' side-r';
-    docStyle.setProperty('--gl', `calc(${l.offsetWidth + 10}px + env(safe-area-inset-left))`);
-    docStyle.setProperty('--gr', `calc(${r.offsetWidth + 10}px + env(safe-area-inset-right))`);
-    window.dispatchEvent(new Event('resize')); // Phaser refits to the narrowed #app
   };
   const globals = ['pointerup', 'pointercancel', 'blur'] as const;
   for (const ev of globals) window.addEventListener(ev, release);
   window.addEventListener('controls-swap', layout);
   document.body.append(root);
-  document.body.classList.add('controls');
   layout();
 
   const get = (id: string) => buttons.get(id);
@@ -117,8 +111,6 @@ export function mountTouchControls(spec: { left: TouchGroup; right: TouchGroup }
       window.removeEventListener('controls-swap', layout);
       for (const ev of globals) window.removeEventListener(ev, release);
       root.remove();
-      document.body.classList.remove('controls');
-      window.dispatchEvent(new Event('resize'));
     },
   };
 }
