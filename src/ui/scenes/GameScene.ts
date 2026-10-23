@@ -27,6 +27,7 @@ export class GameScene extends Phaser.Scene {
   private smooth = new Smoother();
   private controls!: ReturnType<typeof createControls>;
   private bg!: Phaser.GameObjects.Image;
+  private bgSides: Phaser.GameObjects.Image[] = [];
   private blocks!: BlockRenderer;
   private shots!: ProjectileRenderer;
   private entities!: EntityRenderer;
@@ -60,6 +61,7 @@ export class GameScene extends Phaser.Scene {
     this.bonusShown = 0;
 
     this.bg = this.add.image(0, 0, bgTexture(this, payload.levelIndex ?? 0)).setOrigin(0).setScale(1 / RES).setDepth(0);
+    this.fillScreen();
     this.blocks = new BlockRenderer(this);
     this.shots = new ProjectileRenderer(this);
     this.entities = new EntityRenderer(this);
@@ -92,6 +94,38 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Phones are wider than 16:9: switch the scale manager to EXPAND while this scene runs so the canvas
+   * fills the screen, keep the 960×540 play area centred at full height, and fill the extra side room
+   * with a mirrored, dimmed copy of the level art (touch buttons float over it). Back to FIT on exit,
+   * because the other scenes are laid out for a fixed 960×540.
+   */
+  private fillScreen(): void {
+    const sm = this.scale;
+    // displaySize keeps the aspect lock set at boot for FIT; EXPAND needs it off (0 = Size.NONE)
+    sm.scaleMode = Phaser.Scale.EXPAND;
+    sm.displaySize.setAspectMode(0);
+    sm.refresh();
+    const left = this.add.image(0, 0, this.bg.texture.key).setOrigin(1, 0).setScale(1 / RES).setFlipX(true);
+    const right = this.add.image(WORLD_W, 0, this.bg.texture.key).setOrigin(0, 0).setScale(1 / RES).setFlipX(true);
+    this.bgSides = [left, right];
+    const shade = this.add.graphics().setDepth(0.5);
+    shade.fillStyle(0x0d1020, 0.45).fillRect(-WORLD_W, 0, WORLD_W, WORLD_H).fillRect(WORLD_W, 0, WORLD_W, WORLD_H);
+    shade.fillStyle(0x12162e, 1).fillRect(-WORLD_W, WORLD_H, WORLD_W * 3, 540 - WORLD_H); // HUD strip runs edge to edge
+    shade.fillStyle(0xffffff, 0.25).fillRect(-3, 0, 3, WORLD_H).fillRect(WORLD_W, 0, 3, WORLD_H); // side walls
+    for (const m of this.bgSides) m.setDepth(0);
+    const center = () => this.cameras.main.centerOn(WORLD_W / 2, 270);
+    center();
+    sm.on('resize', center);
+    this.events.once('shutdown', () => {
+      sm.off('resize', center);
+      sm.scaleMode = Phaser.Scale.FIT;
+      sm.displaySize.setAspectMode(Phaser.Scale.FIT);
+      sm.setGameSize(960, 540);
+      sm.refresh();
+    });
+  }
+
   update(time: number, delta: number): void {
     this.loop.setLocalInput(this.controls.read());
     const events = this.loop.update(Math.min(delta, 250));
@@ -101,6 +135,7 @@ export class GameScene extends Phaser.Scene {
     if (s.levelIndex !== this.lastLevel) {
       this.lastLevel = s.levelIndex;
       this.bg.setTexture(bgTexture(this, s.levelIndex));
+      for (const m of this.bgSides) m.setTexture(this.bg.texture.key);
     }
     this.handleEvents(events, s);
     this.blocks.update(s.blocks);

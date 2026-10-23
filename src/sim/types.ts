@@ -83,8 +83,8 @@ export interface Player {
   score: number;
   invulnUntil: number; // tick
   connected: boolean;
-  fireHeld: boolean; // fire was held last tick (harpoons fire once per press)
-  nextFireTick: number; // gun cooldown
+  fireHeld: boolean; // fire was held last tick (a fresh press fires a harpoon immediately)
+  nextFireTick: number; // gun cooldown / harpoon hold-to-refire delay
   trapped: boolean; // hit by a ball: stuck in a bubble until a teammate touches them
   combo: number; // current pop chain multiplier, 1..5
   comboUntil: number; // tick when the chain expires

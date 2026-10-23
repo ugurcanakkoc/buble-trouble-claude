@@ -13,6 +13,7 @@ import {
   turretTexture, unitBox, unitTexture,
 } from './art';
 import { unitIndex, warSim, wallX, type Team, type WarCommand, type WarEvent, type WarInput, type WarState } from './sim';
+import { baseScrollX, isNewMatch } from './camera';
 import { resetSfx, sfx } from './sound';
 
 const W = 960;
@@ -347,7 +348,7 @@ export class WarScene extends Phaser.Scene {
     for (const img of this.units.values()) img.destroy();
     this.units.clear();
     this.seen = new Set(s.log.map((l) => `${l.by}:${l.seq}`));
-    this.cameras.main.scrollX = this.me === 0 ? 0 : B.LANE_W - W;
+    this.cameras.main.scrollX = baseScrollX(this.me, W);
     for (let i = 0; i < 4; i++) this.trainBtns[i].icon?.setTexture(unitTexture(this, i, this.me));
     this.showPanel(false);
   }
@@ -358,7 +359,7 @@ export class WarScene extends Phaser.Scene {
     const events = this.loop.update(Math.min(delta, 250));
     const s = this.loop.state;
     if (!s) return;
-    if (s.tick < this.lastTick) this.resetForMatch();
+    if (isNewMatch(this.lastTick, s.tick)) this.resetForMatch();
     this.lastTick = s.tick;
 
     const cam = this.cameras.main;

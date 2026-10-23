@@ -259,13 +259,15 @@ describe('hits and phases', () => {
 });
 
 describe('weapons', () => {
-  it('harpoon is edge-triggered and allows one rope; double allows two', () => {
+  it('harpoon allows one rope; holding fire re-fires once it is free; double allows two', () => {
     const s = arena();
     ball(s, 3, 100, 100);
     s.freezeUntil = 1e9;
-    expect(count(run(s, 20, () => ({ p0: FIRE })), 'shoot')).toBe(1);
+    expect(count(run(s, 20, () => ({ p0: FIRE })), 'shoot')).toBe(1); // rope still flying
+    expect(count(run(s, 120, () => ({ p0: FIRE })), 'shoot')).toBeGreaterThanOrEqual(1); // held: fires again
+    s.projectiles = [];
     const press = (t: number) => ({ p0: t % 2 === 0 ? FIRE : EMPTY_INPUT });
-    expect(count(run(s, 6, press), 'shoot')).toBe(0); // rope still flying
+    expect(count(run(s, 6, press), 'shoot')).toBe(1); // a fresh press fires at once, then one rope at a time
     s.projectiles = [];
     s.players[0].weapon = 'double';
     expect(count(run(s, 6, press), 'shoot')).toBe(2);

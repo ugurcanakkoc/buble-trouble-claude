@@ -9,6 +9,8 @@ export const BULLET_SPEED = 900;
 export const GUN_INTERVAL = TICK_RATE / 8; // ticks between shots (fractional)
 export const MAX_BULLETS = 6;
 export const STICKY_TICKS = 3 * TICK_RATE;
+// Holding fire re-fires a harpoon as soon as a rope is free (easy on phones); a fresh press skips the wait.
+export const HOLD_REFIRE_TICKS = Math.round(0.3 * TICK_RATE);
 
 export function fire(s: GameState, p: Player, inp: InputState, events: SimEvent[]): void {
   const pressed = inp.fire && !p.fireHeld;
@@ -21,7 +23,9 @@ export function fire(s: GameState, p: Player, inp: InputState, events: SimEvent[
     const y = p.y - PLAYER_H;
     s.projectiles.push({ id: s.nextId++, owner: p.id, kind: 'gun', x: p.x, y, baseY: y, stuckUntil: 0 });
   } else {
-    if (!pressed || mine >= (p.weapon === 'double' ? 2 : 1)) return;
+    const ready = pressed || (inp.fire && s.tick >= p.nextFireTick);
+    if (!ready || mine >= (p.weapon === 'double' ? 2 : 1)) return;
+    p.nextFireTick = s.tick + HOLD_REFIRE_TICKS;
     s.projectiles.push({ id: s.nextId++, owner: p.id, kind: p.weapon, x: p.x, y: p.y, baseY: p.y, stuckUntil: 0 });
   }
   events.push({ type: 'shoot', playerId: p.id, kind: p.weapon });
