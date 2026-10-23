@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { PLAYER_H, WORLD_H, WORLD_W, createGame, getLevel, step, type Ball, type GameState, type Phase, type SimEvent } from '../../sim';
 import { submitScore, type RoomSession, type StartPayload } from '../../net';
 import { sfx } from '../audio';
-import { h, mount, toast } from '../dom';
+import { cssColor, h, mount, toast } from '../dom';
 import { Hud } from '../hud';
 import { createControls } from '../input';
 import { loadScores } from '../leaderboard';
@@ -11,7 +11,9 @@ import { BlockRenderer } from '../render/blocks';
 import { EntityRenderer } from '../render/entities';
 import { Fx } from '../render/fx';
 import { ProjectileRenderer } from '../render/projectiles';
+import { GodRenderer } from '../render/god';
 import { FONT, RES, bgTexture } from '../textures';
+import { clock } from '../hud';
 
 export class GameScene extends Phaser.Scene {
   private session!: RoomSession;
@@ -23,6 +25,8 @@ export class GameScene extends Phaser.Scene {
   private entities!: EntityRenderer;
   private fx!: Fx;
   private hud!: Hud;
+  private godView!: GodRenderer;
+  private roundWinner: 'god' | 'fighters' = 'fighters';
   private banner!: Phaser.GameObjects.Text;
   private bannerSub!: Phaser.GameObjects.Text;
   private lastPhase: Phase | null = null;
@@ -46,6 +50,7 @@ export class GameScene extends Phaser.Scene {
     this.blocks = new BlockRenderer(this);
     this.shots = new ProjectileRenderer(this);
     this.entities = new EntityRenderer(this);
+    this.godView = new GodRenderer(this);
     this.fx = new Fx(this);
     this.hud = new Hud(this);
     const style = (size: number, color: string) => ({
@@ -83,7 +88,8 @@ export class GameScene extends Phaser.Scene {
     this.blocks.update(s.blocks);
     this.shots.update(s.projectiles, s.tick);
     this.entities.update(s, time);
-    this.hud.update(s);
+    this.godView.update(s, time);
+    this.hud.update(s, this.session.self.id);
     this.phaseOverlay(s);
     this.lastBalls = s.balls.map((b) => ({ ...b }));
   }
@@ -140,9 +146,22 @@ export class GameScene extends Phaser.Scene {
         case 'levelComplete':
           sfx.levelComplete();
           break;
+        case 'godDrop':
+          sfx.godDrop(e.size);
+          break;
+        case 'roundEnd': {
+          this.roundWinner = e.winner;
+          const iAmGod = s.god?.godId === this.session.self.id;
+          if ((e.winner === 'god') === iAmGod) sfx.levelComplete();
+          else sfx.boo();
+          break;
+        }
+        case 'matchEnd':
+          sfx.levelComplete();
+          break;
         case 'gameOver':
           sfx.gameOver();
-          if (this.session.isHost) {
+          if (this.session.isHost && s.mode === 'classic') {
             submitScore({ players: s.players.map((p) => p.name), level: s.levelIndex + 1, score: teamScore(s) }).catch(
               (err) => console.warn('submitScore failed', err),
             );
@@ -167,10 +186,15 @@ export class GameScene extends Phaser.Scene {
     this.endCard = null;
     switch (s.phase) {
       case 'ready':
-        set(`Seviye ${s.levelIndex + 1}`, getLevel(s.levelIndex).name);
+        if (s.mode === 'god' && s.god) {
+          const god = s.players.find((p) => p.id === s.god!.godId);
+          set(`Raund ${s.god.round + 1}`, `Tanrı: ${god?.name ?? ''}`);
+        } else if (s.mode === 'rain') set('Yağmur!', 'Hayatta kalın!', '#3fd8ff');
+        else set(`Seviye ${s.levelIndex + 1}`, getLevel(s.levelIndex).name);
         break;
       case 'levelComplete':
-        set('Tamamlandı!', '', '#4be37a');
+        if (s.mode === 'god') set(this.roundWinner === 'god' ? 'Tanrı kazandı!' : 'Savaşçılar kazandı!', '', this.roundWinner === 'god' ? '#b06bff' : '#4be37a');
+        else set('Tamamlandı!', '', '#4be37a');
         break;
       case 'dying':
         set(this.lifeLost === 'timeout' ? 'Süre doldu!' : 'Hepiniz yakalandınız!', '', '#ff6b6b');
@@ -188,22 +212,47 @@ export class GameScene extends Phaser.Scene {
     const again = h('button', { class: 'btn green big', text: 'Tekrar Oyna' });
     again.onclick = () => {
       again.disabled = true;
-      this.session.startGame(startPayload(this.session)); // loop picks it up via onStart
+      this.session.startGame(startPayload(this.session, 0, s.mode)); // loop picks it up via onStart
     };
     const menu = h('button', { class: 'btn ghost', text: 'Menü' });
     menu.onclick = () => this.toMenu();
-    const top = h('div');
-    // give the host's submit a moment so this game can show up in the list
-    setTimeout(() => top.isConnected && loadScores(top, 3), 1200);
+    let title = 'Oyun Bitti';
+    let body: HTMLElement;
+    if (s.mode === 'god' && s.god) {
+      const wins = s.god.roundWins;
+      const rows = [...s.players].sort((a, b) => (wins[b.id] ?? 0) - (wins[a.id] ?? 0));
+      const best = wins[rows[0]?.id] ?? 0;
+      title = 'Maç Bitti';
+      body = h('table', { class: 'final' },
+        ...rows.map((p) =>
+          h('tr', { class: (wins[p.id] ?? 0) === best ? 'win' : '' },
+            h('td', { text: `${(wins[p.id] ?? 0) === best ? '👑 ' : ''}${p.name}`, style: `color:${cssColor(p.color)}` }),
+            h('td', { text: `★ ${wins[p.id] ?? 0}` }),
+          ),
+        ),
+      );
+    } else if (s.mode === 'rain') {
+      body = h('div', { class: 'stats' },
+        h('div', {}, h('b', { text: clock(s.timeLeftTicks) }), 'Hayatta kalma'),
+        h('div', {}, h('b', { text: String(teamScore(s)) }), 'Takım skoru'),
+      );
+    } else {
+      const top = h('div');
+      // give the host's submit a moment so this game can show up in the list
+      setTimeout(() => top.isConnected && loadScores(top, 3), 1200);
+      body = h('div', { class: 'card-body' },
+        h('div', { class: 'stats' },
+          h('div', {}, h('b', { text: String(s.levelIndex + 1) }), 'Seviye'),
+          h('div', {}, h('b', { text: String(teamScore(s)) }), 'Takım skoru'),
+        ),
+        top,
+      );
+    }
     this.endCard = mount(
       h('div', { class: 'screen endcard' },
         h('div', { class: 'card' },
-          h('h1', { class: 'title', text: 'Oyun Bitti' }),
-          h('div', { class: 'stats' },
-            h('div', {}, h('b', { text: String(s.levelIndex + 1) }), 'Seviye'),
-            h('div', {}, h('b', { text: String(teamScore(s)) }), 'Takım skoru'),
-          ),
-          top,
+          h('h1', { class: 'title', text: title }),
+          body,
           this.session.isHost ? again : h('div', { class: 'hint', text: 'Kurucu yeni oyunu başlatabilir…' }),
           menu,
         ),

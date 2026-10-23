@@ -315,3 +315,54 @@ export function bgTexture(scene: Phaser.Scene, levelIndex: number): string {
     g.globalAlpha = 1;
   });
 }
+
+export const CLOUD_W = 150;
+export const CLOUD_H = 70;
+
+/** Fluffy god cloud, or a grumpy grey storm cloud with a face (rain AI). */
+export function cloudTexture(scene: Phaser.Scene, storm: boolean): string {
+  return canvas(scene, storm ? 'cloud_storm' : 'cloud_god', CLOUD_W, CLOUD_H, (g) => {
+    const puffs: [number, number, number][] = [
+      [40, 42, 24], [70, 30, 30], [104, 36, 26], [124, 46, 18], [24, 50, 16], [75, 50, 24],
+    ];
+    const grad = g.createLinearGradient(0, 0, 0, CLOUD_H);
+    grad.addColorStop(0, storm ? '#9aa0b8' : '#ffffff');
+    grad.addColorStop(1, storm ? '#4a5068' : '#c9d8ff');
+    // outline pass then fill pass so puffs merge into one shape
+    g.fillStyle = storm ? '#2a2e40' : '#7d8fc9';
+    for (const [x, y, r] of puffs) {
+      g.beginPath();
+      g.arc(x, y, r + 2.5, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.fillStyle = grad;
+    for (const [x, y, r] of puffs) {
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.fillStyle = 'rgba(255,255,255,.55)';
+    g.beginPath();
+    g.ellipse(62, 18, 14, 6, -0.3, 0, Math.PI * 2);
+    g.fill();
+    if (storm) {
+      // grumpy face
+      g.strokeStyle = '#1b1030';
+      g.lineWidth = 3;
+      g.lineCap = 'round';
+      for (const [x, d] of [[60, 1], [90, -1]] as const) {
+        g.beginPath();
+        g.moveTo(x - 8, 34 - d * 3);
+        g.lineTo(x + 8, 34 + d * 3);
+        g.stroke();
+        g.fillStyle = '#1b1030';
+        g.beginPath();
+        g.arc(x, 42, 3.5, 0, Math.PI * 2);
+        g.fill();
+      }
+      g.beginPath();
+      g.arc(75, 60, 8, Math.PI * 1.15, Math.PI * 1.85);
+      g.stroke();
+    }
+  });
+}

@@ -88,6 +88,10 @@ export class EntityRenderer {
       img.setTexture(powerTexture(this.scene, p.kind)).setPosition(p.x, p.y - 6 + Math.sin(time / 200 + p.id) * 1.5);
       img.setVisible(p.expiresAt === 0 || p.expiresAt - s.tick > 120 || (s.tick >> 3) % 2 === 0); // blink before vanishing
     });
-    this.players.sync(s.players, (p) => p.id, (v, p) => v.sync(p, s, time));
+    const godId = s.mode === 'god' ? s.god?.godId : undefined; // the god rides the cloud instead
+    this.players.sync(s.players, (p) => p.id, (v, p) => {
+      v.sync(p, s, time);
+      if (p.id === godId) v.setVisible(false);
+    });
   }
 }

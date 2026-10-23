@@ -12,6 +12,16 @@ export interface TouchState {
 
 export function createTouchControls(): { state: TouchState; destroy(): void } {
   const state: TouchState = { left: false, right: false, fire: false };
+  const all: { active: Set<number>; sync(): void }[] = [];
+  // Safety net: a release anywhere (or losing focus) always lets go, so a held ATEŞ
+  // (god charging) can never get stuck down.
+  const release = (e: Event) => {
+    for (const b of all) {
+      if (e instanceof PointerEvent) b.active.delete(e.pointerId);
+      else b.active.clear();
+      b.sync();
+    }
+  };
 
   const btn = (key: keyof TouchState, label: string, cls: string) => {
     const el = h('div', { class: `tbtn ${cls}`, text: label });
@@ -33,6 +43,7 @@ export function createTouchControls(): { state: TouchState; destroy(): void } {
       });
     }
     el.addEventListener('contextmenu', (e) => e.preventDefault());
+    all.push({ active, sync });
     return el;
   };
 
@@ -43,11 +54,14 @@ export function createTouchControls(): { state: TouchState; destroy(): void } {
   const applySwap = () => root.classList.toggle('swap', controlsSwapped());
   applySwap();
   window.addEventListener('controls-swap', applySwap);
+  const globals = ['pointerup', 'pointercancel', 'blur'] as const;
+  for (const ev of globals) window.addEventListener(ev, release);
   document.body.append(root);
   return {
     state,
     destroy() {
       window.removeEventListener('controls-swap', applySwap);
+      for (const ev of globals) window.removeEventListener(ev, release);
       root.remove();
     },
   };

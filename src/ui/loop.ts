@@ -7,6 +7,7 @@ export const STEP_MS = 1000 / 60;
 export const MAX_STEPS_PER_FRAME = 5;
 export const SNAPSHOT_EVERY = 8; // ticks -> 7.5 Hz (keeps 4 players under the 100 msg/s budget)
 export const RECONCILE_X = 24;
+export const RECONCILE_CLOUD_X = 60;
 
 const NO_INPUT = EMPTY_INPUT;
 
@@ -119,6 +120,13 @@ export class GameLoop {
       const mine = prev.players.find((p) => p.id === this.selfId);
       const theirs = snap.players.find((p) => p.id === this.selfId);
       if (mine && theirs && Math.abs(mine.x - theirs.x) < RECONCILE_X) theirs.x = mine.x;
+      // Same for my god cloud (it moves faster, so a wider window), and keep my own charge
+      // so hold-to-grow feedback isn't reset by every lagging snapshot.
+      if (prev.god && snap.god && snap.god.godId === this.selfId && prev.god.godId === this.selfId) {
+        if (Math.abs(prev.god.x - snap.god.x) < RECONCILE_CLOUD_X) snap.god.x = prev.god.x;
+        snap.god.charge = prev.god.charge;
+        snap.god.chargeStart = prev.god.chargeStart;
+      }
 
       // Balls that existed locally but are gone in the snapshot were popped by someone else:
       // synthesize pop events so every client gets the sound + particles.

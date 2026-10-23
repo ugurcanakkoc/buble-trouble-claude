@@ -82,6 +82,13 @@ export const sfx = {
   combo(n: number) {
     tone('square', 500 + n * 120, 900 + n * 160, 0.12, 0.1);
   },
+  godDrop(size: BallSize) {
+    noise(0.35 + size * 0.08, 0.35, 500 + size * 150);
+    tone('sine', 900 - size * 120, 180, 0.4, 0.14);
+  },
+  boo() {
+    [330, 311, 294, 262].forEach((f, i) => tone('sawtooth', f, f * 0.9, 0.22, 0.12, i * 0.16));
+  },
   shieldBreak: () => tone('triangle', 1200, 300, 0.25, 0.25),
   blockBreak: () => noise(0.2, 0.6, 900),
   levelComplete() {

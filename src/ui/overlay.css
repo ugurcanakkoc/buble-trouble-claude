@@ -24,6 +24,7 @@ canvas { display: block; }
 .screen {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   padding: 16px; box-sizing: border-box; overflow: auto; pointer-events: none;
+  align-items: safe center;
 }
 .screen > * { pointer-events: auto; }
 
@@ -173,3 +174,26 @@ canvas { display: block; }
   box-shadow: 0 6px 0 #a3204f; animation: toast 3.2s forwards;
 }
 @keyframes toast { 0% { opacity: 0; top: 0 } 8%, 85% { opacity: 1; top: 18px } 100% { opacity: 0 } }
+
+/* lobby mode picker */
+.modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.mode {
+  font: 600 14px var(--font); color: var(--muted); background: #0f1330; border: 3px solid var(--panel-edge);
+  border-radius: 16px; padding: 10px 6px; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  cursor: pointer; min-height: 96px; touch-action: manipulation; transition: border-color .15s, transform .08s;
+}
+.mode .icon { font-size: 28px; line-height: 1; }
+.mode b { font-size: 20px; color: var(--text); }
+.mode small { font-size: 13px; line-height: 1.15; }
+.mode.on { border-color: var(--yellow); background: #2a2550; box-shadow: 0 0 0 3px rgba(255, 210, 63, .25); }
+.mode:disabled { opacity: .45; cursor: default; }
+.card.wide { width: min(520px, 100%); }
+
+/* god final table */
+.final { width: 100%; border-collapse: collapse; font-size: 20px; }
+.final td { padding: 6px 10px; background: #0f1330; }
+.final tr td:first-child { border-radius: 12px 0 0 12px; }
+.final tr td:last-child { border-radius: 0 12px 12px 0; text-align: right; font-weight: 700; color: var(--yellow); }
+.final tr.win td { background: #3a2f10; }
+.final { border-spacing: 0 6px; border-collapse: separate; }
+.card-body { display: flex; flex-direction: column; gap: 12px; }

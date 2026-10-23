@@ -160,6 +160,26 @@ describe('GameLoop client', () => {
     expect(loop.state!.players[1].x).toBe(localX + 30);
   });
 
+  it('keeps my own god cloud x (within 60) and charge across snapshots', () => {
+    const { s, emit } = fakeSession(false);
+    const loop = new GameLoop(s, fakeSim().sim);
+    emit('start', payload);
+    const god = (x: number, charge: number) => ({
+      godId: 'c', x, mana: 5, charge, chargeStart: 10, nextDropTick: 0, round: 0, roundEndsTick: 0,
+      roundWins: {}, order: ['c', 'h'], aiTargetX: 0, aiTargetSize: 0,
+    });
+    loop.state!.god = god(300, 2);
+    const near = mkState(payload.players);
+    near.god = god(340, -1);
+    emit('snapshot', near);
+    expect(loop.state!.god!.x).toBe(300);
+    expect(loop.state!.god!.charge).toBe(2);
+    const far = mkState(payload.players);
+    far.god = god(400, -1);
+    emit('snapshot', far);
+    expect(loop.state!.god!.x).toBe(400);
+  });
+
   it('synthesizes pop events for balls that disappeared in a snapshot', () => {
     const { s, emit } = fakeSession(false);
     const loop = new GameLoop(s, fakeSim().sim);
