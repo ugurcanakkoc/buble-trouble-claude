@@ -42,7 +42,7 @@ export function updatePowerUps(s: GameState, events: SimEvent[]): void {
     } else if (s.tick >= u.expiresAt) return false;
 
     for (const p of s.players) {
-      if (!p.connected) continue;
+      if (!p.connected || p.trapped) continue;
       if (Math.abs(p.x - u.x) < PLAYER_W / 2 + half && u.y + half > p.y - PLAYER_H && u.y - half < p.y) {
         applyPowerUp(s, p, u.kind);
         events.push({ type: 'powerup', kind: u.kind, playerId: p.id });

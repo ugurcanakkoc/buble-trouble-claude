@@ -57,6 +57,22 @@ describe('balls', () => {
     }
   });
 
+  it('combo: pops within 1.2 s chain up to x5, then reset', () => {
+    const s = arena();
+    const pts: number[] = [];
+    const pop = () => {
+      const ev: SimEvent[] = [];
+      popBall(s, ball(s, 0, 800, 100), 'p0', ev);
+      const e = ev[0] as Extract<SimEvent, { type: 'pop' }>;
+      pts.push(e.points * 10 + e.combo);
+    };
+    for (let i = 0; i < 6; i++) { pop(); s.tick += 60; }
+    s.tick += 73;
+    pop();
+    expect(pts).toEqual([2001, 4002, 6003, 8004, 10005, 10005, 2001]);
+    expect(s.players[0].score).toBe(200 * (1 + 2 + 3 + 4 + 5 + 5 + 1));
+  });
+
   it('bounces back to the same apex every time', () => {
     const s = arena();
     s.players[0].connected = false;
@@ -132,7 +148,8 @@ describe('hits and phases', () => {
     s.players[0].weapon = 'gun';
     ball(s, 1, 480, WORLD_H - 30);
     const ev = step(s, {});
-    expect(ev).toContainEqual({ type: 'hit', playerId: 'p0' });
+    expect(ev).toContainEqual({ type: 'trapped', playerId: 'p0' });
+    expect(ev).toContainEqual({ type: 'hit', playerId: 'p0' }); // solo: trapped = life lost
     expect(s.lives).toBe(4);
     expect(s.phase).toBe('dying');
     const ev2 = run(s, 120);
@@ -142,6 +159,38 @@ describe('hits and phases', () => {
     expect(s.players[0].score).toBe(777);
     expect(s.players[0].weapon).toBe('harpoon');
     expect(s.timeLeftTicks).toBe(LEVELS[0].timeSeconds * 60);
+    expect(s.players[0].trapped).toBe(false);
+  });
+
+  it('co-op: trapped player is revived by a teammate; all trapped → life lost', () => {
+    const s = arena(2); // p0 at 320, p1 at 640
+    s.freezeUntil = 1e9;
+    const b = ball(s, 1, 320, WORLD_H - 30);
+    let ev = step(s, {});
+    expect(ev).toContainEqual({ type: 'trapped', playerId: 'p0' });
+    expect(count(ev, 'hit')).toBe(0);
+    expect(s.lives).toBe(5);
+    // trapped players can't move or fire
+    ev = run(s, 5, () => ({ p0: { ...EMPTY_INPUT, right: true, fire: true } }));
+    expect(s.players[0].x).toBe(320);
+    expect(count(ev, 'shoot')).toBe(0);
+    s.balls.splice(s.balls.indexOf(b), 1);
+    ball(s, 3, 100, 100);
+    ev = run(s, 120, () => ({ p1: { ...EMPTY_INPUT, left: true } }));
+    const rev = ev.find((e) => e.type === 'revive');
+    expect(rev).toEqual({ type: 'revive', playerId: 'p0', by: 'p1' });
+    expect(s.players[0].trapped).toBe(false);
+    expect(s.players[0].invulnUntil).toBeGreaterThan(s.tick);
+
+    const t = arena(2);
+    t.freezeUntil = 1e9;
+    ball(t, 1, 320, WORLD_H - 30);
+    step(t, {});
+    ball(t, 1, 640, WORLD_H - 30);
+    ev = step(t, {});
+    expect(ev).toContainEqual({ type: 'hit', playerId: 'p1' });
+    expect(t.lives).toBe(4);
+    expect(t.phase).toBe('dying');
   });
 
   it('nothing hurts during ready', () => {
@@ -169,7 +218,7 @@ describe('hits and phases', () => {
     ball(s, 3, 100, 100);
     s.timeLeftTicks = 3;
     const ev = run(s, 3);
-    expect(ev).toContainEqual({ type: 'hit', playerId: '' });
+    expect(ev).toContainEqual({ type: 'timeout' });
     expect(s.lives).toBe(4);
     expect(s.phase).toBe('dying');
   });
@@ -195,15 +244,6 @@ describe('hits and phases', () => {
     expect(s.phase).toBe('ready');
     run(s, 90);
     expect(s.phase).toBe('playing');
-  });
-
-  it('victory after the last level', () => {
-    const s = createGame(1, infos(2), LEVELS.length - 1);
-    s.phase = 'playing';
-    s.balls = [];
-    const ev = run(s, 121);
-    expect(ev).toContainEqual({ type: 'victory' });
-    expect(s.phase).toBe('victory');
   });
 
   it('disconnected players are ignored', () => {
@@ -291,21 +331,6 @@ describe('players', () => {
     expect(createGame(1, infos(1)).players[0].x).toBe(480);
   });
 
-  it('climbs a ladder onto a platform and stands there', () => {
-    const s = createGame(1, infos(1), 10); // level 11: platform 360..600 at y=300, ladder at x 600..632
-    s.phase = 'playing';
-    s.balls = [{ id: 1, x: 60, y: 100, vx: 0, vy: 0, size: 0, color: 0 }];
-    s.freezeUntil = 1e9;
-    const p = s.players[0];
-    p.x = 616;
-    run(s, 120, () => ({ p0: { ...EMPTY_INPUT, up: true } }));
-    expect(p.y).toBe(300);
-    run(s, 30, () => ({ p0: { ...EMPTY_INPUT, left: true } }));
-    expect(p.x).toBeLessThan(600);
-    expect(p.y).toBe(300);
-    run(s, 100, () => ({ p0: { ...EMPTY_INPUT, left: true } }));
-    expect(p.y).toBe(WORLD_H); // walked off the left edge and fell
-  });
 });
 
 describe('determinism', () => {
@@ -321,7 +346,7 @@ describe('determinism', () => {
     const out: Record<string, InputState> = {};
     for (const id of ['p0', 'p1', 'p2']) {
       const v = r();
-      out[id] = { left: (v & 3) === 1, right: (v & 3) === 2, up: (v & 4) > 0, down: (v & 24) === 8, fire: (v & 32) > 0 };
+      out[id] = { left: (v & 3) === 1, right: (v & 3) === 2, fire: (v & 32) > 0 };
     }
     return out;
   };

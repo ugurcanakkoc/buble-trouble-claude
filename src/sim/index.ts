@@ -1,4 +1,5 @@
 export * from './types';
-export { LEVELS, createGame, step } from './game';
+export { createGame, step } from './game';
+export { LEVELS, getLevel } from './levels';
 export { BALL_RADIUS } from './balls';
 export { PLAYER_W, PLAYER_H } from './players';

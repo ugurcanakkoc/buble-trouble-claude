@@ -1,4 +1,4 @@
-import type { GameState, InputState, PlayerId, PlayerInfo } from '../sim/types';
+import type { GameMode, GameState, InputState, PlayerId, PlayerInfo } from '../sim/types';
 
 export interface LobbyPlayer extends PlayerInfo {
   isHost: boolean;
@@ -8,6 +8,7 @@ export interface StartPayload {
   seed: number;
   players: PlayerInfo[]; // order = spawn order
   levelIndex: number;
+  mode: GameMode; // chosen by host in lobby
 }
 
 export type JoinError = 'ROOM_NOT_FOUND' | 'ROOM_FULL' | 'GAME_STARTED' | 'NETWORK';

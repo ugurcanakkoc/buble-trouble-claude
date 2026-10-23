@@ -1,5 +1,5 @@
 import type { Ball, BallSize, GameState, SimEvent } from './types';
-import { WORLD_H, WORLD_W } from './types';
+import { TICK_RATE, WORLD_H, WORLD_W } from './types';
 import { DT, circleHitsBox, isSolid } from './geom';
 import { maybeDropPowerUp } from './powerups';
 
@@ -12,6 +12,8 @@ const APEX_Y = [330, 250, 170, 100];
 export const BALL_GRAVITY = 600;
 export const BALL_VX = 100;
 const SPLIT_KICK = 250;
+export const COMBO_TICKS = Math.round(1.2 * TICK_RATE);
+export const MAX_COMBO = 5;
 
 /** Upward speed needed after a floor bounce to reach the size's apex. */
 export const bounceSpeed = (size: BallSize) =>
@@ -42,17 +44,24 @@ export function moveBalls(s: GameState): void {
   }
 }
 
-/** Pop a ball: score, event, split into two smaller balls, maybe drop a power-up. */
+/** Pop a ball: combo score, event, split into two smaller balls, maybe drop a power-up. */
 export function popBall(s: GameState, ball: Ball, playerId: string, events: SimEvent[]): void {
   s.balls.splice(s.balls.indexOf(ball), 1);
   const owner = s.players.find((p) => p.id === playerId);
-  if (owner) owner.score += BALL_SCORE[ball.size];
-  events.push({ type: 'pop', x: ball.x, y: ball.y, size: ball.size, playerId });
+  let combo = 1;
+  if (owner) {
+    combo = owner.combo = s.tick < owner.comboUntil ? Math.min(MAX_COMBO, owner.combo + 1) : 1;
+    owner.comboUntil = s.tick + COMBO_TICKS;
+  }
+  const points = BALL_SCORE[ball.size] * combo;
+  if (owner) owner.score += points;
+  events.push({ type: 'pop', x: ball.x, y: ball.y, size: ball.size, playerId, points, combo });
   if (ball.size > 0) {
     const size = (ball.size - 1) as BallSize;
     const vy = Math.min(ball.vy, -SPLIT_KICK);
+    const speed = Math.abs(ball.vx); // children keep the level's ball speed
     for (const dir of [-1, 1]) {
-      s.balls.push({ id: s.nextId++, x: ball.x, y: ball.y, vx: dir * BALL_VX, vy, size, color: ball.color });
+      s.balls.push({ id: s.nextId++, x: ball.x, y: ball.y, vx: dir * speed, vy, size, color: ball.color });
     }
   }
   maybeDropPowerUp(s, ball.x, ball.y);

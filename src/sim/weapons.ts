@@ -1,8 +1,8 @@
-import type { GameState, InputState, Projectile, SimEvent } from './types';
+import type { GameState, InputState, Player, Projectile, SimEvent } from './types';
 import { TICK_RATE } from './types';
 import { BALL_RADIUS, popBall } from './balls';
 import { DT, circleHitsVSeg, isSolid } from './geom';
-import { PLAYER_H, type SimPlayer } from './players';
+import { PLAYER_H } from './players';
 
 export const HARPOON_SPEED = 600;
 export const BULLET_SPEED = 900;
@@ -10,11 +10,11 @@ export const GUN_INTERVAL = TICK_RATE / 8; // ticks between shots (fractional)
 export const MAX_BULLETS = 6;
 export const STICKY_TICKS = 3 * TICK_RATE;
 
-export function fire(s: GameState, p: SimPlayer, inp: InputState, events: SimEvent[]): void {
+export function fire(s: GameState, p: Player, inp: InputState, events: SimEvent[]): void {
   const pressed = inp.fire && !p.fireHeld;
   const mine = s.projectiles.filter((q) => q.owner === p.id).length;
   if (p.weapon === 'gun') {
-    const next = p.nextFireTick ?? 0;
+    const next = p.nextFireTick;
     if (!inp.fire || s.tick < next || mine >= MAX_BULLETS) return;
     // Keep the fractional schedule while firing continuously; restart it after a pause.
     p.nextFireTick = (s.tick - next < 1 ? next : s.tick) + GUN_INTERVAL;

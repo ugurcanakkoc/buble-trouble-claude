@@ -11,12 +11,10 @@ export type PlayerId = string;
 export interface InputState {
   left: boolean;
   right: boolean;
-  up: boolean; // climb ladder
-  down: boolean;
   fire: boolean;
 }
 
-export const EMPTY_INPUT: InputState = { left: false, right: false, up: false, down: false, fire: false };
+export const EMPTY_INPUT: InputState = { left: false, right: false, fire: false };
 
 export interface PlayerInfo {
   id: PlayerId;
@@ -70,14 +68,16 @@ export interface Player {
   weapon: WeaponKind;
   shield: boolean;
   score: number;
-  onLadder: boolean;
   invulnUntil: number; // tick
   connected: boolean;
   fireHeld: boolean; // fire was held last tick (harpoons fire once per press)
   nextFireTick: number; // gun cooldown
+  trapped: boolean; // hit by a ball: stuck in a bubble until a teammate touches them
+  combo: number; // current pop chain multiplier, 1..5
+  comboUntil: number; // tick when the chain expires
 }
 
-export type BlockKind = 'wall' | 'breakable' | 'ladder';
+export type BlockKind = 'wall' | 'breakable';
 
 export interface Block {
   id: number;
@@ -89,12 +89,12 @@ export interface Block {
   hp: number; // breakable: hits left; others: 0
 }
 
-export type Phase = 'ready' | 'playing' | 'levelComplete' | 'dying' | 'gameOver' | 'victory';
+export type Phase = 'ready' | 'playing' | 'levelComplete' | 'dying' | 'gameOver'; // endless: no victory
 
 export interface GameState {
   tick: number;
   rng: number; // seeded PRNG state (mulberry32), advanced only by sim
-  levelIndex: number;
+  levelIndex: number; // 0-based, unbounded (levels past the handcrafted set are generated)
   phase: Phase;
   phaseUntil: number; // tick when a timed phase (ready/levelComplete/dying) ends
   timeLeftTicks: number;
@@ -110,19 +110,22 @@ export interface GameState {
 
 export type SimEvent =
   | { type: 'shoot'; playerId: PlayerId; kind: WeaponKind }
-  | { type: 'pop'; x: number; y: number; size: BallSize; playerId: PlayerId }
+  | { type: 'pop'; x: number; y: number; size: BallSize; playerId: PlayerId; points: number; combo: number }
   | { type: 'powerup'; kind: PowerUpKind; playerId: PlayerId }
   | { type: 'shieldBreak'; playerId: PlayerId }
-  | { type: 'hit'; playerId: PlayerId }
+  | { type: 'trapped'; playerId: PlayerId } // player caught in a bubble
+  | { type: 'revive'; playerId: PlayerId; by: PlayerId }
+  | { type: 'hit'; playerId: PlayerId } // whole team trapped -> life lost (playerId = last trapped)
+  | { type: 'timeout' } // timer ran out -> life lost
   | { type: 'blockBreak'; x: number; y: number }
   | { type: 'levelStart'; levelIndex: number }
   | { type: 'levelComplete'; levelIndex: number }
-  | { type: 'gameOver' }
-  | { type: 'victory' };
+  | { type: 'gameOver' };
 
 export interface LevelDef {
   name: string;
   timeSeconds: number;
+  speed?: number; // ball horizontal speed multiplier, default 1
   balls: { x: number; size: BallSize; dir: -1 | 1; y?: number }[];
   blocks: { kind: BlockKind; x: number; y: number; w: number; h: number; hp?: number }[];
 }
