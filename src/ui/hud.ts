@@ -84,12 +84,15 @@ export class Hud {
     this.hearts.forEach((h, i) => h.setVisible(showLives && (many ? i === 0 : i < s.lives)));
     this.livesText.setVisible(showLives && many).setText(`x ${s.lives}`);
 
+    // co-op competition: crown on the unique top scorer
+    const top = god ? null : [...s.players].sort((a, b) => b.score - a.score);
+    const leader = top && top[0] && top[0].score > 0 && (top.length < 2 || top[0].score > top[1].score) ? top[0].id : '';
     this.slots.forEach((slot, i) => {
       const p = s.players[i];
       slot.name.setVisible(!!p);
       slot.score.setVisible(!!p);
       if (!p) return;
-      slot.name.setText(clip(p.name, 8)).setColor(hex(p.color)).setAlpha(p.connected ? 1 : 0.4);
+      slot.name.setText((p.id === leader ? '👑' : '') + clip(p.name, p.id === leader ? 6 : 8)).setColor(hex(p.color)).setAlpha(p.connected ? 1 : 0.4);
       slot.score.setText(god ? `★ ${god.roundWins[p.id] ?? 0}${p.id === god.godId ? ' ☁' : ''}` : String(p.score));
     });
   }

@@ -68,6 +68,20 @@ export class Fx {
     this.sparks.explode(16, x, y);
   }
 
+  /** Big centered banner-ish text that pops in, holds, floats away. */
+  callout(text: string, color: number | string, y = 150, size = 44) {
+    const t = this.scene.add
+      .text(480, y, text, {
+        fontFamily: FONT, fontSize: `${size}px`, fontStyle: '700', color: typeof color === 'string' ? color : hex(color),
+        stroke: '#0d1020', strokeThickness: 8, resolution: 2, align: 'center',
+      })
+      .setOrigin(0.5)
+      .setDepth(19)
+      .setScale(0.3);
+    this.scene.tweens.add({ targets: t, scale: 1, duration: 260, ease: 'Back.easeOut' });
+    this.scene.tweens.add({ targets: t, y: y - 30, alpha: 0, delay: 1100, duration: 500, onComplete: () => t.destroy() });
+  }
+
   blockBreak(x: number, y: number) {
     this.dust.explode(18, x, y);
   }

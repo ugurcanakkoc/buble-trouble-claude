@@ -287,3 +287,29 @@ canvas { display: block; }
   .menu .error { min-height: 0; }
   .gcard .icon { font-size: 32px; }
 }
+
+/* Skor Tablosu */
+.board-card { width: min(640px, 100%); max-height: 92vh; }
+.board-body { overflow: auto; display: flex; flex-direction: column; gap: 8px; text-align: left; min-height: 0; }
+.tabs { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+.tab { font: inherit; font-size: 18px; font-weight: 700; color: var(--text); background: #1c2250; border: 2px solid var(--panel-edge); border-radius: 12px; padding: 6px 12px; cursor: pointer; }
+.tab.on { background: var(--pink); }
+.board .scores { max-height: none; overflow: visible; }
+.scores li.me { outline: 2px solid var(--yellow); }
+.board .sub { margin: 6px 0 0; font-size: 18px; color: var(--yellow); }
+.h2h { display: flex; gap: 8px; align-items: center; justify-content: center; }
+.sel { font: inherit; font-size: 18px; background: #0f1330; color: var(--text); border: 2px solid var(--panel-edge); border-radius: 10px; padding: 4px 8px; min-width: 0; max-width: 40%; }
+.h2h-res { text-align: center; font-size: 22px; font-weight: 700; color: var(--cyan); }
+.recent { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.recent li { display: flex; gap: 8px; align-items: baseline; font-size: 16px; background: #0f1330; border-radius: 10px; padding: 6px 10px; }
+.recent .when, .recent .dur, .recent .mode-l { color: var(--muted); white-space: nowrap; }
+.recent .who { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent b { color: var(--yellow); }
+@media (max-height: 430px) {
+  .board-card { max-height: 98vh; }
+  .tab { font-size: 15px; padding: 3px 9px; }
+  .board .scores li { font-size: 16px; padding: 4px 10px; }
+  .h2h-res { font-size: 18px; }
+  .recent li { font-size: 14px; padding: 4px 8px; }
+  .board .sub { font-size: 15px; }
+}

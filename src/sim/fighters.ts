@@ -44,6 +44,7 @@ export function worldTick(s: GameState, fighters: Player[], input: (p: Player) =
     if (!by) continue;
     t.trapped = false;
     t.invulnUntil = s.tick + REVIVE_INVULN_TICKS;
+    by.stats.revives++;
     events.push({ type: 'revive', playerId: t.id, by: by.id });
   }
 
@@ -60,6 +61,8 @@ export function worldTick(s: GameState, fighters: Player[], input: (p: Player) =
       events.push({ type: 'shieldBreak', playerId: p.id });
     } else {
       p.trapped = true;
+      p.stats.trapped++;
+      if (s.mode === 'god' && s.god) { const g = s.players.find((q) => q.id === s.god!.godId); if (g) g.stats.godTraps++; }
       lastTrapped = p.id;
       events.push({ type: 'trapped', playerId: p.id });
     }

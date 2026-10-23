@@ -45,6 +45,7 @@ export function updatePowerUps(s: GameState, fighters: Player[], events: SimEven
       if (p.trapped) continue;
       if (Math.abs(p.x - u.x) < PLAYER_W / 2 + half && u.y + half > p.y - PLAYER_H && u.y - half < p.y) {
         applyPowerUp(s, p, u.kind);
+        p.stats.powerUps++;
         events.push({ type: 'powerup', kind: u.kind, playerId: p.id });
         return false;
       }

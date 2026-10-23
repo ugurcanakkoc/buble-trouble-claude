@@ -1,6 +1,6 @@
 // Bubble-specific client/host loop behavior (moved from ui/loop.test.ts when the loop went generic).
 import { describe, expect, it } from 'vitest';
-import { EMPTY_INPUT, createGame, type GameState, type InputState, type PlayerInfo } from '../../sim';
+import { EMPTY_INPUT, createGame, newStats, type GameState, type InputState, type PlayerInfo } from '../../sim';
 import type { StartPayload } from '../../net';
 import { GameLoop } from '../../ui/loop';
 import { Smoother } from '../../ui/render/smooth';
@@ -13,10 +13,10 @@ const IDLE: InputState = { ...EMPTY_INPUT };
 function mkState(players: PlayerInfo[]): GameState {
   return {
     tick: 0, rng: 1, levelIndex: 0, phase: 'playing', phaseUntil: 0, timeLeftTicks: 6000, lives: 5,
-    freezeUntil: 0, nextId: 10, balls: [], projectiles: [], powerUps: [], blocks: [], mode: 'classic', god: null,
+    freezeUntil: 0, nextId: 10, balls: [], projectiles: [], powerUps: [], blocks: [], mode: 'classic', god: null, timeBonus: 0,
     players: players.map((p, i) => ({
       ...p, x: 100 + i * 100, y: 480, facing: 1, weapon: 'harpoon', shield: false, score: 0,
-      invulnUntil: 0, connected: true, fireHeld: false, nextFireTick: 0, trapped: false, combo: 1, comboUntil: 0,
+      invulnUntil: 0, connected: true, fireHeld: false, nextFireTick: 0, trapped: false, combo: 1, comboUntil: 0, stats: newStats(),
     })),
   };
 }

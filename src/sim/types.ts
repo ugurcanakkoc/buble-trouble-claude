@@ -58,6 +58,19 @@ export interface PowerUp {
   expiresAt: number; // tick
 }
 
+/** Per-player match stats (plain JSON). pops is indexed by BallSize. god-only: drops, godTraps (fighters trapped while god). */
+export interface PlayerStats {
+  pops: [number, number, number, number];
+  maxCombo: number;
+  revives: number; // teammates freed
+  trapped: number; // times caught in a bubble
+  powerUps: number;
+  drops: number;
+  godTraps: number;
+}
+
+export const newStats = (): PlayerStats => ({ pops: [0, 0, 0, 0], maxCombo: 0, revives: 0, trapped: 0, powerUps: 0, drops: 0, godTraps: 0 });
+
 export interface Player {
   id: PlayerId;
   name: string;
@@ -75,6 +88,7 @@ export interface Player {
   trapped: boolean; // hit by a ball: stuck in a bubble until a teammate touches them
   combo: number; // current pop chain multiplier, 1..5
   comboUntil: number; // tick when the chain expires
+  stats: PlayerStats;
 }
 
 export type BlockKind = 'wall' | 'breakable';
@@ -124,6 +138,7 @@ export interface GameState {
   powerUps: PowerUp[];
   players: Player[];
   blocks: Block[];
+  timeBonus: number; // classic: per-player points credited on the last level clear (0 otherwise)
   mode: GameMode;
   god: GodState | null; // null in classic
 }

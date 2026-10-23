@@ -45,6 +45,20 @@ export interface BPlayer {
   invulnUntil: number;
   seq: number; // last bomb seq seen
   wins: number;
+  // per-match stats (reset only by createGame)
+  kills: number; // enemies killed (teammates don't count)
+  deaths: number;
+  suicides: number;
+  crates: number;
+  items: number;
+  death: Death | null; // how this player died this round (null while alive)
+}
+
+export type DeathCause = 'bomb' | 'self' | 'crush';
+export interface Death {
+  by: PlayerId | null; // killer for 'bomb', the player itself for 'self', null for 'crush'
+  cause: DeathCause;
+  multi: number; // enemies this chain has killed so far (≥2 → "ÇİFTE!", "ÜÇLÜ!")
 }
 
 export interface Bomb {
@@ -64,6 +78,8 @@ export interface Flame {
   c: number;
   r: number;
   t: number; // ticks left
+  o: PlayerId; // owner of the bomb that produced it (kill attribution)
+  ch: number; // chain id: the root bomb's id, shared by everything it set off
 }
 
 export interface Item {
@@ -90,6 +106,7 @@ export interface BombState {
   items: Item[];
   players: BPlayer[];
   nextId: number;
+  chainKills: Record<string, number>; // `${chain}|${killer}` → enemies that killer's flames in that chain got this round
 }
 
 export type BombEvent =
@@ -98,7 +115,7 @@ export type BombEvent =
   | { type: 'crate'; c: number; r: number }
   | { type: 'pickup'; id: PlayerId; k: ItemKind }
   | { type: 'shield'; id: PlayerId }
-  | { type: 'death'; id: PlayerId; x: number; y: number }
+  | ({ type: 'death'; id: PlayerId; x: number; y: number } & Death)
   | { type: 'kick'; c: number; r: number }
   | { type: 'countdown'; n: number }
   | { type: 'go' }
@@ -184,12 +201,12 @@ export function createGame(seed: number, infos: PlayerInfo[], mode: string): Bom
       bot: !h,
       x: 0, y: 0, dir: 'd', moving: false, alive: true,
       bombs: 0, fire: 0, speed: 0, kick: false, shield: false, curse: null, curseUntil: 0, invulnUntil: 0,
-      seq: 0, wins: 0,
+      seq: 0, wins: 0, kills: 0, deaths: 0, suicides: 0, crates: 0, items: 0, death: null,
     });
   }
   const s: BombState = {
     tick: 0, rng: seed >>> 0 || 1, mode: mode === 'team' ? 'team' : 'ffa', phase: 'countdown', phaseTicks: 0, round: 0,
-    timeLeft: 0, sdIdx: 0, sdNext: 0, grace: -1, lastWinner: null, grid: [], bombs: [], flames: [], items: [], players, nextId: 1,
+    timeLeft: 0, sdIdx: 0, sdNext: 0, grace: -1, lastWinner: null, grid: [], bombs: [], flames: [], items: [], players, nextId: 1, chainKills: {},
   };
   newRound(s);
   return s;
@@ -207,11 +224,12 @@ export function newRound(s: BombState): void {
   s.sdIdx = 0;
   s.sdNext = 0;
   s.grace = -1;
+  s.chainKills = {};
   for (const p of s.players) {
     const [c, r] = SPAWNS[p.slot];
     Object.assign(p, {
       x: c + 0.5, y: r + 0.5, dir: 'd', moving: false, alive: true, bombs: B.startBombs, fire: B.startFire, speed: 0,
-      kick: false, shield: false, curse: null, curseUntil: 0, invulnUntil: 0,
+      kick: false, shield: false, curse: null, curseUntil: 0, invulnUntil: 0, death: null,
     });
   }
 }
@@ -363,36 +381,65 @@ export function blastCells(s: BombState, c: number, r: number, fire: number): { 
 }
 
 function explode(s: BombState, ev: BombEvent[]): void {
-  const queue = s.bombs.filter((b) => b.fuse <= 0 || flameAt(s, b.c, b.r));
-  const burning = new Map<number, [number, number]>();
+  // [bomb, chain id]: a bomb set off by a lingering flame joins that flame's chain
+  const queue: [Bomb, number][] = s.bombs
+    .filter((b) => b.fuse <= 0 || flameAt(s, b.c, b.r))
+    .map((b) => [b, s.flames.find((f) => f.c === b.c && f.r === b.r)?.ch ?? b.id]);
+  const burning = new Map<number, [number, number, PlayerId]>();
   while (queue.length) {
-    const b = queue.shift()!;
+    const [b, ch] = queue.shift()!;
     const i = s.bombs.indexOf(b);
     if (i < 0) continue;
     s.bombs.splice(i, 1);
     ev.push({ type: 'explode', c: b.c, r: b.r });
     const { cells, crates } = blastCells(s, b.c, b.r, b.fire);
-    for (const [c, r] of crates) burning.set(idx(c, r), [c, r]);
+    for (const [c, r] of crates) if (!burning.has(idx(c, r))) burning.set(idx(c, r), [c, r, b.owner]);
     for (const [c, r] of cells) {
       const f = s.flames.find((q) => q.c === c && q.r === r);
-      if (f) f.t = B.flameTicks;
-      else s.flames.push({ c, r, t: B.flameTicks });
+      if (f) Object.assign(f, { t: B.flameTicks, o: b.owner, ch });
+      else s.flames.push({ c, r, t: B.flameTicks, o: b.owner, ch });
       s.items = s.items.filter((it) => it.c !== c || it.r !== r);
       const other = bombAt(s, c, r);
-      if (other && !queue.includes(other)) queue.push(other);
+      if (other && !queue.some(([q]) => q === other)) queue.push([other, ch]);
     }
   }
-  for (const [i, [c, r]] of burning) {
+  for (const [i, [c, r, owner]] of burning) {
     s.grid[i] = FLOOR;
+    const o = s.players.find((p) => p.id === owner);
+    if (o) o.crates++;
     ev.push({ type: 'crate', c, r });
     if (random(s) < B.dropChance) s.items.push({ c, r, k: pickItem(s) });
   }
 }
 
-function kill(p: BPlayer, ev: BombEvent[]): void {
+/** f = the flame that got them; none = crushed by sudden death. */
+function kill(s: BombState, p: BPlayer, ev: BombEvent[], f?: Flame): void {
   p.alive = false;
   p.moving = false;
-  ev.push({ type: 'death', id: p.id, x: p.x, y: p.y });
+  p.deaths++;
+  let d: Death = { by: null, cause: 'crush', multi: 0 };
+  if (f) {
+    const k = s.players.find((q) => q.id === f.o);
+    if (!k || k === p) {
+      p.suicides++;
+      d = { by: p.id, cause: 'self', multi: 0 };
+    } else {
+      const enemy = side(s, k) !== side(s, p);
+      if (enemy) k.kills++;
+      const key = `${f.ch}|${k.id}`;
+      const n = (s.chainKills[key] ?? 0) + (enemy ? 1 : 0);
+      s.chainKills[key] = n;
+      d = { by: k.id, cause: 'bomb', multi: n };
+    }
+  }
+  p.death = d;
+  ev.push({ type: 'death', id: p.id, x: p.x, y: p.y, ...d });
+}
+
+/** Most kills; ties → fewer deaths → fewer suicides → slot. null if nobody killed anyone. */
+export function mvp(players: BPlayer[]): BPlayer | null {
+  const best = [...players].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths || a.suicides - b.suicides || a.slot - b.slot)[0];
+  return best && best.kills > 0 ? best : null;
 }
 
 function suddenDeath(s: BombState, ev: BombEvent[]): void {
@@ -410,7 +457,7 @@ function suddenDeath(s: BombState, ev: BombEvent[]): void {
     ev.push({ type: 'fall', c, r });
     for (const p of s.players) {
       const [pc, pr] = cellOf(p);
-      if (p.alive && pc === c && pr === r) kill(p, ev);
+      if (p.alive && pc === c && pr === r) kill(s, p, ev);
     }
     return;
   }
@@ -463,6 +510,7 @@ export function step(s: BombState, inputs: Record<PlayerId, BombInput>): BombEve
       const k = s.items[it].k;
       s.items.splice(it, 1);
       applyItem(s, p, k);
+      p.items++;
       ev.push({ type: 'pickup', id: p.id, k });
     }
   }
@@ -485,12 +533,13 @@ export function step(s: BombState, inputs: Record<PlayerId, BombInput>): BombEve
   for (const p of s.players) {
     if (!p.alive || s.tick < p.invulnUntil) continue;
     const [c, r] = cellOf(p);
-    if (!flameAt(s, c, r)) continue;
+    const f = s.flames.find((q) => q.c === c && q.r === r);
+    if (!f) continue;
     if (p.shield) {
       p.shield = false;
       p.invulnUntil = s.tick + B.shieldInvulnTicks;
       ev.push({ type: 'shield', id: p.id });
-    } else kill(p, ev);
+    } else kill(s, p, ev, f);
   }
   for (const f of s.flames) f.t--;
   s.flames = s.flames.filter((f) => f.t > 0);

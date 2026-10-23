@@ -1,5 +1,5 @@
 // Synthesized sound effects (WebAudio, no files) + a remembered mute toggle.
-import type { BallSize } from '../sim';
+import type { BallSize, PowerUpKind } from '../sim';
 import { h, load, save } from './dom';
 
 let ctx: AudioContext | null = null;
@@ -80,30 +80,42 @@ const noise = (dur: number, vol: number, filter: number) => playNoise({ dur, vol
 
 // Balon Avı sounds
 export const sfx = {
-  shoot: () => tone('square', 880, 1760, 0.09, 0.12),
+  shoot() { // harpoon whoosh
+    noise(0.14, 0.12, 2200);
+    tone('sine', 500, 1500, 0.12, 0.08);
+  },
   gun: () => tone('square', 1400, 700, 0.05, 0.08),
   pop(size: BallSize) {
-    const base = [700, 480, 330, 220][size];
-    tone('sine', base * 1.6, base * 0.6, 0.16 + size * 0.04, 0.35);
+    const base = [700, 480, 330, 220][size] * (0.94 + Math.random() * 0.12); // small ones high, slight detune
+    tone('sine', base * 1.6, base * 0.6, 0.16 + size * 0.04, 0.3);
     noise(0.12 + size * 0.05, 0.4, base * 3);
   },
-  powerup() {
-    [523, 659, 784, 1047].forEach((f, i) => tone('triangle', f, f, 0.12, 0.22, i * 0.06));
+  powerup(kind: PowerUpKind = 'shield') {
+    const notes: Record<PowerUpKind, number[]> = {
+      shield: [523, 784], clock: [880, 660, 880, 660], dynamite: [330, 262, 196], life: [523, 659, 784, 1047, 1319],
+      time: [660, 880, 1100], double: [587, 880], sticky: [440, 554, 659], gun: [784, 988, 1175],
+    };
+    const wave = kind === 'dynamite' ? 'sawtooth' : 'triangle';
+    notes[kind].forEach((f, i) => tone(wave, f, f, 0.12, 0.2, i * 0.06));
   },
   hit() {
     tone('sawtooth', 300, 60, 0.5, 0.3);
     noise(0.3, 0.5, 400);
   },
   trapped() {
-    tone('sine', 600, 200, 0.35, 0.25);
-    tone('sine', 900, 300, 0.35, 0.12, 0.05);
+    tone('sine', 700, 180, 0.3, 0.28); // bloop
+    tone('sine', 350, 120, 0.25, 0.18, 0.12);
   },
   revive() {
-    [440, 660, 880].forEach((f, i) => tone('triangle', f, f * 1.05, 0.1, 0.22, i * 0.05));
+    [880, 1175, 1480, 1760, 2349].forEach((f, i) => tone('sine', f, f * 1.03, 0.14, 0.14, i * 0.045)); // sparkle
   },
   combo(n: number) {
-    tone('square', 500 + n * 120, 900 + n * 160, 0.12, 0.1);
+    const f = 440 * 2 ** ((n * 2) / 12); // whole-tone step per chain level
+    tone('square', f, f * 1.5, 0.12, 0.1);
+    tone('triangle', f * 2, f * 2, 0.08, 0.08, 0.04);
   },
+  tick: (urgent = false) => tone('square', urgent ? 1300 : 1000, urgent ? 1300 : 1000, 0.04, 0.07),
+  bonusTick: () => tone('square', 1500 + Math.random() * 200, 1700, 0.03, 0.05),
   godDrop(size: BallSize) {
     noise(0.35 + size * 0.08, 0.35, 500 + size * 150);
     tone('sine', 900 - size * 120, 180, 0.4, 0.14);
@@ -114,10 +126,12 @@ export const sfx = {
   shieldBreak: () => tone('triangle', 1200, 300, 0.25, 0.25),
   blockBreak: () => noise(0.2, 0.6, 900),
   levelComplete() {
-    [523, 659, 784, 659, 784, 1047].forEach((f, i) => tone('square', f, f, 0.14, 0.12, i * 0.1));
+    [523, 659, 784, 1047].forEach((f, i) => tone('square', f, f, 0.12, 0.12, i * 0.08));
+    [784, 988, 1175, 1568].forEach((f) => tone('triangle', f, f, 0.5, 0.12, 0.38)); // held chord
   },
   gameOver() {
     [392, 330, 262, 196].forEach((f, i) => tone('triangle', f, f * 0.97, 0.3, 0.25, i * 0.22));
+    tone('sawtooth', 98, 70, 0.8, 0.14, 0.9);
   },
 };
 

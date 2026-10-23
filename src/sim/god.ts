@@ -147,6 +147,8 @@ function godControl(s: GameState, inp: InputState, fighters: number, events: Sim
     g.nextDropTick = s.tick + ticks(B.cooldownSec);
     const dir = random(s) < 0.5 ? -1 : 1;
     s.balls.push({ id: s.nextId++, x: g.x, y: B.cloudY, vx: dir * BALL_VX, vy: 0, size, color: SIZE_COLORS[size] });
+    const gp = s.players.find((q) => q.id === g.godId);
+    if (gp) gp.stats.drops++;
     events.push({ type: 'godDrop', x: g.x, size });
   }
 }

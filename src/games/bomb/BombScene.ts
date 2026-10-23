@@ -1,8 +1,8 @@
 // Bomba scene: renders BombState, plays synthesized sfx, HUD cards on both sides of the arena.
 import Phaser from 'phaser';
-import type { RoomSession, StartPayload } from '../../net';
+import { recordMatch, type RoomSession, type StartPayload } from '../../net';
 import { playNoise, playTone } from '../../ui/audio';
-import { cssColor, isTouch, toast } from '../../ui/dom';
+import { cssColor, h, isTouch, toast } from '../../ui/dom';
 import { showEndCard } from '../../ui/endcard';
 import { GameLoop, startPayload } from '../../ui/loop';
 import { mountNetMeter } from '../../ui/netmeter';
@@ -16,7 +16,7 @@ import {
 } from './art';
 import { BALANCE as B, COLS, ROWS, TICK } from './balance';
 import {
-  CRATE, FLOOR, WALL, bombSim, idx, side,
+  CRATE, FLOOR, WALL, bombSim, idx, mvp, side,
   type BPlayer, type Bomb, type BombEvent, type BombInput, type BombState, type Flame, type Item, type ItemKind,
 } from './sim';
 
@@ -76,30 +76,66 @@ function createControls() {
   };
 }
 
-const sfx = {
-  place: () => playTone({ freq: 260, slideTo: 150, dur: 0.09, type: 'square', vol: 0.14 }),
-  tick: () => playTone({ freq: 1800, dur: 0.025, type: 'square', vol: 0.04 }),
-  explode() {
-    playNoise({ dur: 0.55, vol: 0.7, filter: 260 });
-    playTone({ freq: 140, slideTo: 38, dur: 0.4, vol: 0.45 });
-  },
-  crate: () => playNoise({ dur: 0.18, vol: 0.25, filter: 1400 }),
-  pickup: (k: ItemKind) =>
-    k === 'skull'
-      ? [500, 420, 340].forEach((f, i) => playTone({ freq: f, dur: 0.12, type: 'sawtooth', vol: 0.12, delay: i * 0.08 }))
-      : [523, 659, 784, 1047].forEach((f, i) => playTone({ freq: f, dur: 0.1, type: 'triangle', vol: 0.2, delay: i * 0.05 })),
-  shield: () => playTone({ freq: 1200, slideTo: 300, dur: 0.25, type: 'triangle', vol: 0.25 }),
-  death() {
-    playTone({ freq: 600, slideTo: 80, dur: 0.6, type: 'sawtooth', vol: 0.22 });
-    playNoise({ dur: 0.25, vol: 0.3, filter: 500, delay: 0.05 });
-  },
-  kick: () => playTone({ freq: 180, slideTo: 90, dur: 0.1, type: 'square', vol: 0.18 }),
-  beep: (hi: boolean) => playTone({ freq: hi ? 880 : 440, dur: hi ? 0.3 : 0.15, type: 'square', vol: 0.12 }),
-  sudden: () => [0, 0.3, 0.6].forEach((d) => playTone({ freq: 700, slideTo: 350, dur: 0.25, type: 'sawtooth', vol: 0.14, delay: d })),
-  fall: () => playNoise({ dur: 0.12, vol: 0.35, filter: 180 }),
-  win: () => [523, 659, 784, 659, 784, 1047].forEach((f, i) => playTone({ freq: f, dur: 0.14, type: 'square', vol: 0.12, delay: i * 0.1 })),
-  lose: () => [392, 330, 262].forEach((f, i) => playTone({ freq: f, dur: 0.25, type: 'triangle', vol: 0.2, delay: i * 0.18 })),
+// Synth sfx. Volumes are relative to each other (master gain + mute live in ui/audio); highs stay <= ~1.3 kHz.
+const tri = (freq: number, dur: number, vol: number, delay = 0, slideTo = freq) => playTone({ freq, dur, vol, delay, slideTo, type: 'triangle' });
+const arp = (notes: number[], step: number, dur: number, vol: number) => notes.forEach((f, i) => tri(f, dur, vol, i * step));
+const PICKUP: Record<ItemKind, () => void> = {
+  bomb: () => arp([392, 587], 0.06, 0.12, 0.2),
+  fire: () => arp([440, 659, 880], 0.05, 0.11, 0.18),
+  speed: () => playTone({ freq: 330, slideTo: 1100, dur: 0.18, type: 'sine', vol: 0.2 }),
+  kick: () => arp([330, 494], 0.07, 0.12, 0.2),
+  shield: () => arp([659, 880, 1175], 0.05, 0.18, 0.14),
+  maxfire: () => arp([523, 659, 784, 1047], 0.045, 0.12, 0.17),
+  skull: () => [500, 420, 340].forEach((f, i) => playTone({ freq: f, dur: 0.12, type: 'sawtooth', vol: 0.09, delay: i * 0.08 })),
 };
+const sfx = {
+  place: () => playTone({ freq: 260, slideTo: 150, dur: 0.09, type: 'square', vol: 0.12 }),
+  sizzle: () => playNoise({ dur: 0.04, vol: 0.06, filter: 2800 }),
+  explode(big: boolean) {
+    const k = 0.9 + Math.random() * 0.2; // slight pitch variation so chains don't sound copy-pasted
+    playTone({ freq: 115 * k, slideTo: 34, dur: 0.38, type: 'sine', vol: big ? 0.6 : 0.5 });
+    playTone({ freq: 70 * k, slideTo: 28, dur: 0.55, type: 'triangle', vol: 0.3 });
+    playNoise({ dur: big ? 0.65 : 0.5, vol: 0.55, filter: 300 * k });
+    playNoise({ dur: 0.1, vol: 0.22, filter: 1300 * k });
+  },
+  crate: () => playNoise({ dur: 0.18, vol: 0.22, filter: 1100 }),
+  pickup: (k: ItemKind) => PICKUP[k](),
+  shield: () => tri(1100, 0.25, 0.22, 0, 300),
+  death() {
+    playNoise({ dur: 0.07, vol: 0.35, filter: 900 }); // pop
+    tri(520, 0.5, 0.22, 0.04, 110);
+  },
+  kick() {
+    playTone({ freq: 120, slideTo: 48, dur: 0.13, type: 'sine', vol: 0.45 });
+    playNoise({ dur: 0.06, vol: 0.2, filter: 220 });
+  },
+  beep: () => tri(523, 0.14, 0.24),
+  go() {
+    tri(784, 0.4, 0.2);
+    tri(1047, 0.4, 0.14);
+  },
+  multi: (n: number) => arp([587, 784, 988].slice(0, n), 0.07, 0.14, 0.16),
+  sudden() {
+    // one rising-falling siren sweep, twice
+    for (const d of [0, 0.7]) {
+      playTone({ freq: 380, slideTo: 640, dur: 0.35, type: 'sawtooth', vol: 0.08, delay: d });
+      playTone({ freq: 640, slideTo: 380, dur: 0.35, type: 'sawtooth', vol: 0.08, delay: d + 0.35 });
+    }
+  },
+  fall: () => playNoise({ dur: 0.12, vol: 0.3, filter: 180 }),
+  win: () => arp([523, 659, 784, 1047], 0.09, 0.16, 0.18),
+  lose: () => [392, 330, 262].forEach((f, i) => tri(f, 0.25, 0.2, i * 0.18)),
+  fanfare() {
+    const notes: [number, number][] = [[392, 0.12], [523, 0.12], [659, 0.12], [784, 0.3], [659, 0.12], [784, 0.6]];
+    let t = 0;
+    for (const [f, d] of notes) {
+      playTone({ freq: f, dur: d + 0.05, type: 'square', vol: 0.07, delay: t });
+      tri(f / 2, d + 0.1, 0.18, t);
+      t += d;
+    }
+  },
+};
+const MULTI = ['', '', 'ÇİFTE!', 'ÜÇLÜ!', 'DÖRTLÜ!'];
 
 interface Card {
   bg: Phaser.GameObjects.Graphics;
@@ -108,6 +144,7 @@ interface Card {
   status: Phaser.GameObjects.Text;
   stars: Phaser.GameObjects.Image[];
   stats: Phaser.GameObjects.Text[];
+  wins: number; // last drawn, to pop newly won stars
   icons: Phaser.GameObjects.Image[];
   curse: Phaser.GameObjects.Text;
   key: string;
@@ -138,6 +175,10 @@ export class BombScene extends Phaser.Scene {
   private lastTick = 0;
   private tickAt = 0;
   private flameSet = new Set<number>();
+  private matchPoint!: Phaser.GameObjects.Text;
+  private feed: Phaser.GameObjects.Text[] = [];
+  private seen = new Set<string>(); // `${round}:${what}` presentation one-shots (feed lines, drama, siren)
+  private recorded = false;
 
   constructor() {
     super('BombGame');
@@ -155,6 +196,11 @@ export class BombScene extends Phaser.Scene {
     this.closeEnd = null;
     this.lastTick = 0;
     this.smooth.clear();
+    this.feed = [];
+    this.seen.clear();
+    this.recorded = false;
+    this.tweens.timeScale = 1;
+    this.cameras.main.setZoom(1).centerOn(480, 270);
 
     const bg = this.add.graphics().setDepth(0);
     bg.fillGradientStyle(0x1b1f3d, 0x1b1f3d, 0x0d1020, 0x0d1020).fillRect(0, 0, 960, 540);
@@ -189,6 +235,7 @@ export class BombScene extends Phaser.Scene {
       .setDepth(10);
     this.banner = this.add.text(px(COLS / 2), py(ROWS / 2) - 16, '', txt(64, '#ffd23f', 10)).setOrigin(0.5).setDepth(20);
     this.bannerSub = this.add.text(px(COLS / 2), py(ROWS / 2) + 40, '', txt(28, '#f4f1ff', 7)).setOrigin(0.5).setDepth(20);
+    this.matchPoint = this.add.text(px(COLS / 2), py(ROWS / 2) + 84, '', txt(26, '#ff5a5a', 7)).setOrigin(0.5).setDepth(20);
 
     this.controls = createControls();
     this.loop = new GameLoop(session, bombSim, {
@@ -222,9 +269,13 @@ export class BombScene extends Phaser.Scene {
     this.drawEntities(s, time);
     this.drawHud(s);
     this.drawBanner(s, time);
-    if (s.bombs.length && time - this.tickAt > 480) {
-      this.tickAt = time;
-      sfx.tick();
+    // fuse sizzle speeds up as the most urgent bomb nears detonation
+    if (s.bombs.length && s.phase === 'play') {
+      const fuse = Math.min(...s.bombs.map((b) => b.fuse));
+      if (time - this.tickAt > 80 + 400 * Math.max(0, fuse / B.fuseTicks)) {
+        this.tickAt = time;
+        sfx.sizzle();
+      }
     }
   }
 
@@ -234,6 +285,10 @@ export class BombScene extends Phaser.Scene {
     this.smooth.clear();
     this.gridKey = '';
     this.bannerKey = '';
+    this.seen.clear();
+    this.recorded = false;
+    for (const t of this.feed) t.destroy();
+    this.feed = [];
   }
 
   // ---------- client event synthesis (things the host simulated that local prediction missed)
@@ -243,7 +298,7 @@ export class BombScene extends Phaser.Scene {
     for (const p of next.players) {
       const o = prev.players.find((q) => q.id === p.id);
       if (!o) continue;
-      if (o.alive && !p.alive) ev.push({ type: 'death', id: p.id, x: p.x, y: p.y });
+      if (o.alive && !p.alive) ev.push({ type: 'death', id: p.id, x: p.x, y: p.y, ...(p.death ?? { by: null, cause: 'crush', multi: 0 }) });
       if (p.id !== this.loop.selfId && prev.round === next.round) this.smooth.correct(p.id, px(o.x), py(o.y), px(p.x), py(p.y));
     }
     if (prev.round === next.round) {
@@ -277,7 +332,7 @@ export class BombScene extends Phaser.Scene {
         case 'place': once('place', sfx.place); break;
         case 'explode':
           once('explode', () => {
-            sfx.explode();
+            sfx.explode(events.filter((q) => q.type === 'explode').length > 1);
             this.cameras.main.shake(120, 0.004);
           });
           break;
@@ -286,19 +341,20 @@ export class BombScene extends Phaser.Scene {
           this.debris(e.c, e.r);
           break;
         case 'pickup':
-          if (e.id === this.loop.selfId || this.session.isHost) once('pickup', () => sfx.pickup(e.k));
+          if (e.id === this.loop.selfId) once('pickup', () => sfx.pickup(e.k));
           break;
         case 'shield': once('shield', sfx.shield); break;
         case 'death': {
           once('death', sfx.death);
           const p = s.players.find((q) => q.id === e.id);
           if (p) this.deathFx(p, e.x, e.y);
+          if (p) this.onDeath(s, p, e);
           break;
         }
         case 'kick': once('kick', sfx.kick); break;
-        case 'countdown': sfx.beep(false); break;
-        case 'go': sfx.beep(true); break;
-        case 'sudden': sfx.sudden(); break;
+        case 'countdown': sfx.beep(); break;
+        case 'go': sfx.go(); break;
+        case 'sudden': if (this.oneShot(s, 'sudden')) sfx.sudden(); break;
         case 'fall':
           once('fall', sfx.fall);
           this.fallFx(e.c, e.r);
@@ -309,9 +365,71 @@ export class BombScene extends Phaser.Scene {
           else sfx.lose();
           break;
         }
-        case 'matchEnd': break;
+        case 'matchEnd': {
+          const me = s.players.find((p) => p.id === this.loop.selfId);
+          if (me && e.winner !== null && side(s, me) === e.winner) sfx.fanfare();
+          break;
+        }
       }
     }
+  }
+
+  /** true the first time `what` happens this round (client snapshots can replay events). */
+  private oneShot(s: BombState, what: string): boolean {
+    const k = `${s.round}:${what}`;
+    if (this.seen.has(k)) return false;
+    this.seen.add(k);
+    return true;
+  }
+
+  private onDeath(s: BombState, p: BPlayer, e: Extract<BombEvent, { type: 'death' }>): void {
+    if (!this.oneShot(s, `death:${p.id}`)) return;
+    const name = (id: string | null) => s.players.find((q) => q.id === id)?.name ?? '?';
+    if (e.cause === 'crush') this.pushFeed(`🧱 ${p.name} ezildi`, '#c9c8f0');
+    else if (e.cause === 'self') this.pushFeed(`💀 ${p.name} kendini patlattı`, '#ffb36b');
+    else this.pushFeed(`💥 ${name(e.by)} → ${p.name}`, '#f4f1ff');
+    if (e.multi >= 2) this.callout(`${name(e.by)}: ${MULTI[Math.min(e.multi, 4)]}`, e.multi);
+    // the round's deciding death: brief slow-mo + zoom on it (presentation only, the sim keeps running)
+    const alive = new Set(s.players.filter((q) => q.alive).map((q) => side(s, q)));
+    if (s.phase === 'play' && alive.size <= 1 && this.oneShot(s, 'drama')) this.drama(e.x, e.y);
+  }
+
+  private pushFeed(msg: string, color: string): void {
+    const t = this.add.text(px(COLS) - 10, 0, msg, txt(15, color, 4)).setOrigin(1, 0).setDepth(15);
+    this.feed.unshift(t);
+    while (this.feed.length > 4) {
+      const old = this.feed.pop()!;
+      this.tweens.killTweensOf(old);
+      old.destroy();
+    }
+    this.feed.forEach((o, i) => o.setY(Y0 + 8 + i * 20));
+    this.tweens.add({
+      targets: t, alpha: 0, delay: 4000, duration: 700,
+      onComplete: () => {
+        this.feed = this.feed.filter((o) => o !== t);
+        t.destroy();
+      },
+    });
+  }
+
+  private callout(msg: string, n: number): void {
+    sfx.multi(n);
+    const t = this.add.text(px(COLS / 2), py(2.2), msg, txt(40, '#ff7ad9', 8)).setOrigin(0.5).setDepth(21).setScale(0.3);
+    this.tweens.add({ targets: t, scale: 1, duration: 260, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: t, alpha: 0, y: t.y - 20, delay: 1100, duration: 500, onComplete: () => t.destroy() });
+  }
+
+  private drama(x: number, y: number): void {
+    const cam = this.cameras.main;
+    cam.flash(160, 255, 244, 214);
+    cam.zoomTo(1.35, 260, 'Quad.easeOut');
+    cam.pan(px(x), py(y), 260, 'Quad.easeOut');
+    this.tweens.timeScale = 0.35; // death/debris tweens play in slow motion
+    this.time.delayedCall(800, () => {
+      this.tweens.timeScale = 1;
+      cam.zoomTo(1, 380, 'Quad.easeInOut');
+      cam.pan(480, 270, 380, 'Quad.easeInOut');
+    });
   }
 
   private debris(c: number, r: number): void {
@@ -429,6 +547,7 @@ export class BombScene extends Phaser.Scene {
       stats: [],
       curse: this.add.text(x + 93, y + 196, '', txt(18, '#a6ff8a', 4)).setOrigin(0.5).setDepth(10),
       key: '',
+      wins: -1,
     };
     const kinds: ItemKind[] = ['bomb', 'fire', 'speed', 'kick', 'shield'];
     kinds.forEach((k, i) => {
@@ -458,6 +577,12 @@ export class BombScene extends Phaser.Scene {
       c.name.setText(p.name.slice(0, 10)).setColor(cssColor(p.color));
       c.status.setText(p.alive ? (p.bot ? 'Bot' : 'Hayatta') : '💀 Elendi');
       c.stars.forEach((st, i) => st.setTexture(starTexture(this, i < p.wins)));
+      if (c.wins >= 0 && p.wins > c.wins && c.stars[p.wins - 1]) {
+        const st = c.stars[p.wins - 1];
+        st.setScale(2.6 / RES).setAngle(-90);
+        this.tweens.add({ targets: st, scale: 1.1 / RES, angle: 0, duration: 650, delay: 300, ease: 'Back.easeOut' });
+      }
+      c.wins = p.wins;
       const vals = [String(p.bombs), String(p.fire), String(p.speed), p.kick ? '✓' : '–', p.shield ? '✓' : '–'];
       c.stats.forEach((t, i) => t.setText(vals[i]));
       c.icons.forEach((ic, i) => ic.setAlpha(i < 3 || vals[i] === '✓' ? 1 : 0.3));
@@ -479,10 +604,12 @@ export class BombScene extends Phaser.Scene {
       const left = s.phaseTicks - 30;
       main = left > 0 ? String(Math.ceil(left / 60)) : 'Başla!';
       sub = `Raund ${s.round}`;
+      if (this.matchPointSides(s)) sub += '  ·  MAÇ SAYISI!';
     } else if (s.phase === 'play' && B.roundTicks - s.timeLeft < 40) main = 'Başla!';
     else if (s.phase === 'play' && s.timeLeft === 0 && s.sdIdx < 14) [main, color] = ['Ani ölüm!', '#ff5a5a'];
     else if (s.phase === 'roundEnd' || s.phase === 'matchEnd') {
-      [main, color] = s.lastWinner === null ? ['Berabere!', '#c9c8f0'] : [`${this.winnerName(s, s.lastWinner)} kazandı!`, '#4be37a'];
+      const verb = s.phase === 'matchEnd' ? 'maçı aldı!' : 'raundu aldı!';
+      [main, color] = s.lastWinner === null ? ['Berabere!', '#c9c8f0'] : [`${this.winnerName(s, s.lastWinner)} ${verb}`, '#4be37a'];
       if (s.phase === 'roundEnd') sub = this.scoreLine(s);
     }
     const key = `${main}|${sub}`;
@@ -494,10 +621,20 @@ export class BombScene extends Phaser.Scene {
         this.banner.setScale(0.3);
         this.tweens.add({ targets: this.banner, scale: 1, duration: 320, ease: 'Back.easeOut' });
       }
+      const mp = s.phase === 'roundEnd' ? this.matchPointSides(s) : null;
+      this.matchPoint.setText(mp ? `MAÇ SAYISI! ${mp}` : '').setVisible(!!mp);
     }
+    if (this.matchPoint.visible) this.matchPoint.setScale(1 + 0.06 * Math.sin(time / 110));
     if (main === 'Ani ölüm!') this.banner.setAlpha(0.6 + 0.4 * Math.sin(time / 90));
     else this.banner.setAlpha(1);
     if (s.phase === 'matchEnd' && !this.closeEnd) this.showEnd(s);
+  }
+
+  /** Names of sides one round from winning the match, or null. */
+  private matchPointSides(s: BombState): string | null {
+    if (s.players.some((p) => p.wins >= B.winsToWin)) return null;
+    const sides = [...new Set(s.players.filter((p) => p.wins === B.winsToWin - 1).map((p) => side(s, p)))];
+    return sides.length ? sides.map((w) => this.winnerName(s, w)).join(', ') : null;
   }
 
   private winnerName(s: BombState, w: string): string {
@@ -515,21 +652,70 @@ export class BombScene extends Phaser.Scene {
 
   private showEnd(s: BombState): void {
     const champ = s.lastWinner === null ? null : this.winnerName(s, s.lastWinner);
-    const rows = [...s.players].sort((a, b) => b.wins - a.wins || a.slot - b.slot);
+    const star = mvp(s.players);
+    const rows = [...s.players].sort((a, b) => b.wins - a.wins || b.kills - a.kills || a.deaths - b.deaths || a.slot - b.slot);
     const lines =
       s.mode === 'team'
         ? [0, 1]
             .map((t) => ({ t, w: s.players.find((p) => p.team === t)!.wins }))
             .sort((a, b) => b.w - a.w)
-            .map(({ t, w }, i) => `${i + 1}. ${TEAM_NAMES[t]} (${s.players.filter((p) => p.team === t).map((p) => p.name).join(', ')}) ${'★'.repeat(w)}`)
-        : rows.map((p, i) => `${i + 1}. ${p.name} ${'★'.repeat(p.wins)}${'☆'.repeat(Math.max(0, B.winsToWin - p.wins))}`);
+            .map(({ t, w }) => `${TEAM_NAMES[t]}: ${w} raund`)
+        : [];
+    if (star) lines.push(`⭐ MVP: ${star.name} (${star.kills} öldürme)`);
     this.closeEnd = showEndCard({
       title: champ ? `${champ} şampiyon!` : 'Maç bitti',
       lines,
+      body: this.standings(rows, star),
       isHost: this.session.isHost,
       onRestart: () => this.session.startGame(startPayload(this.session, this.payload.mode)),
       onMenu: () => this.toMenu(),
     });
+    if (this.session.isHost && !this.recorded) {
+      this.recorded = true;
+      void this.record(s);
+    }
+  }
+
+  private standings(rows: BPlayer[], star: BPlayer | null): HTMLElement {
+    const cell = 'padding:4px 8px;text-align:center';
+    const head = ['Oyuncu', 'Raund', '💥', '💀', 'Kendini'].map((t) => h('th', { style: cell, text: t }));
+    const body = rows.map((p, ri) => {
+      const stars = h('td', { style: cell + ';white-space:nowrap' });
+      for (let i = 0; i < B.winsToWin; i++) {
+        const sp = h('span', { text: i < p.wins ? '★' : '☆', style: `display:inline-block;color:${i < p.wins ? '#ffd23f' : '#666a8a'}` });
+        stars.append(sp);
+        if (i < p.wins)
+          sp.animate?.([{ transform: 'scale(0) rotate(-90deg)' }, { transform: 'scale(1.4)' }, { transform: 'scale(1)' }], {
+            duration: 450, delay: 250 + ri * 120 + i * 140, fill: 'backwards',
+          });
+      }
+      return h('tr', {},
+        h('td', { style: `${cell};text-align:left;color:${cssColor(p.color)};font-weight:700`, text: `${p.name}${p.id.startsWith('bot') ? ' 🤖' : ''}${p === star ? ' ⭐MVP' : ''}` }),
+        stars,
+        h('td', { style: cell, text: String(p.kills) }),
+        h('td', { style: cell, text: String(p.deaths) }),
+        h('td', { style: cell, text: String(p.suicides) }),
+      );
+    });
+    return h('table', { style: 'margin:8px auto 12px;border-collapse:collapse;font-size:15px' }, h('tr', {}, ...head), ...body);
+  }
+
+  /** Host-only, once per match. Bots aren't players in the record; a bot win or a draw has no winners. */
+  private async record(s: BombState): Promise<void> {
+    const humans = s.players.filter((p) => !p.id.startsWith('bot'));
+    const per = (k: 'kills' | 'deaths') => Object.fromEntries(humans.map((p) => [p.name, p[k]]));
+    try {
+      await recordMatch({
+        game: 'bomb',
+        mode: s.mode,
+        players: humans.map((p) => p.name),
+        winners: s.lastWinner === null ? [] : humans.filter((p) => side(s, p) === s.lastWinner).map((p) => p.name),
+        stats: { kills: per('kills'), deaths: per('deaths') },
+        durationS: s.tick / TICK,
+      });
+    } catch (err) {
+      console.warn('recordMatch failed', err);
+    }
   }
 
   private toMenu(): void {

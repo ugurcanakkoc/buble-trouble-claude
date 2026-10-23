@@ -1,7 +1,9 @@
 import Phaser from 'phaser';
-import { PLAYER_H, WORLD_H, WORLD_W, getLevel, type Ball, type GameState, type InputState, type Phase, type SimEvent } from '../../sim';
+import { MAX_COMBO } from '../../sim/balls';
+import { matchSummary, matchWinners, mvpOf, totalPops } from '../../sim/stats';
+import { PLAYER_H, TICK_RATE, WORLD_H, WORLD_W, getLevel, type Ball, type GameState, type InputState, type Phase, type SimEvent } from '../../sim';
 import { bubbleLoopOptions, bubbleSim } from '../../games/bubble/sim';
-import { submitScore, type RoomSession, type StartPayload } from '../../net';
+import { recordMatch, submitScore, type RoomSession, type StartPayload } from '../../net';
 import { sfx } from '../audio';
 import { cssColor, h, toast } from '../dom';
 import { showEndCard } from '../endcard';
@@ -39,6 +41,9 @@ export class GameScene extends Phaser.Scene {
   private lastBalls: Ball[] = [];
   private lifeLost: 'hit' | 'timeout' = 'hit';
   private endCard: (() => void) | null = null;
+  private leader = '';
+  private tickSec = -1;
+  private bonusShown = 0;
 
   constructor() {
     super('Game');
@@ -50,6 +55,9 @@ export class GameScene extends Phaser.Scene {
     this.lastLevel = -1;
     this.lastBalls = [];
     this.endCard = null;
+    this.leader = '';
+    this.tickSec = -1;
+    this.bonusShown = 0;
 
     this.bg = this.add.image(0, 0, bgTexture(this, payload.levelIndex ?? 0)).setOrigin(0).setScale(1 / RES).setDepth(0);
     this.blocks = new BlockRenderer(this);
@@ -102,6 +110,7 @@ export class GameScene extends Phaser.Scene {
     this.godView.update(s, time, this.smooth);
     this.hud.update(s, this.session.self.id);
     this.phaseOverlay(s);
+    this.extras(s);
     this.lastBalls = s.balls.map((b) => ({ ...b }));
   }
 
@@ -124,6 +133,7 @@ export class GameScene extends Phaser.Scene {
           sfx.pop(e.size);
           this.fx.pop(e.x, e.y, e.size, best?.color ?? 0xffffff, e.points);
           const p = player(e.playerId);
+          if (p && e.combo === MAX_COMBO) this.fx.callout(`x${MAX_COMBO} KOMBO!`, p.color, 120, 56);
           if (p && e.combo >= 2) {
             sfx.combo(e.combo);
             this.fx.combo(p.x, p.y - PLAYER_H - 80, e.combo, p.color);
@@ -131,7 +141,7 @@ export class GameScene extends Phaser.Scene {
           break;
         }
         case 'powerup':
-          sfx.powerup();
+          sfx.powerup(e.kind);
           break;
         case 'shieldBreak':
           sfx.shieldBreak();
@@ -140,7 +150,11 @@ export class GameScene extends Phaser.Scene {
         case 'revive': {
           const p = player(e.playerId);
           if (e.type === 'trapped') sfx.trapped();
-          else sfx.revive();
+          else {
+            sfx.revive();
+            const by = player(e.by);
+            if (p && by) this.fx.callout(`${by.name}, ${acc(p.name)} kurtardı!`, by.color, 180, 30);
+          }
           if (p) this.fx.bubbles(p.x, p.y - PLAYER_H / 2);
           break;
         }
@@ -205,7 +219,7 @@ export class GameScene extends Phaser.Scene {
         break;
       case 'levelComplete':
         if (s.mode === 'god') set(this.roundWinner === 'god' ? 'Tanrı kazandı!' : 'Savaşçılar kazandı!', '', this.roundWinner === 'god' ? '#b06bff' : '#4be37a');
-        else set('Tamamlandı!', '', '#4be37a');
+        else set(`Seviye ${s.levelIndex + 1} tamam!`, '', '#4be37a');
         break;
       case 'dying':
         set(this.lifeLost === 'timeout' ? 'Süre doldu!' : 'Hepiniz yakalandınız!', '', '#ff6b6b');
@@ -219,27 +233,60 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Per-frame extras: time bonus count-up, leader change, low-time ticking. */
+  private extras(s: GameState): void {
+    if (s.mode === 'classic' && s.phase === 'levelComplete' && s.timeBonus > 0) {
+      const k = Math.min(1, (120 - (s.phaseUntil - s.tick)) / 80);
+      const shown = Math.round((s.timeBonus * k) / 10) * 10;
+      this.bannerSub.setText(`Süre bonusu +${shown}`).setVisible(true).setColor('#fff6a8');
+      if (shown !== this.bonusShown) sfx.bonusTick();
+      this.bonusShown = shown;
+    } else this.bonusShown = 0;
+
+    if (s.mode !== 'god' && s.phase === 'playing') {
+      const top = [...s.players].sort((a, b) => b.score - a.score);
+      const lead = top[0] && top[0].score > 0 && (top.length < 2 || top[0].score > top[1].score) ? top[0] : null;
+      if (lead && this.leader && lead.id !== this.leader) this.fx.callout(`${lead.name} öne geçti!`, lead.color, 220, 28);
+      if (lead) this.leader = lead.id;
+    }
+    if (s.mode !== 'rain' && s.phase === 'playing') {
+      const sec = Math.ceil(s.timeLeftTicks / TICK_RATE);
+      if (sec <= 10 && sec > 0 && sec !== this.tickSec) sfx.tick(sec <= 3);
+      this.tickSec = sec;
+    } else this.tickSec = -1;
+  }
+
   private showEnd(s: GameState): void {
+    const god = s.mode === 'god' && s.god ? s.god : null;
+    const mvp = god ? null : mvpOf(s.players);
+    const winnerNames = matchWinners(s);
     let title = 'Oyun Bitti';
+    if (god) title = winnerNames.length !== 1 ? 'Berabere!' : 'Maç Bitti';
+    else if (mvp) title = `${mvp.name} MVP!`;
+    const head = god ? ['Oyuncu', 'Raund', 'Düşürülen', 'Yakalanan'] : ['Oyuncu', 'Skor', 'Patlatma', 'Kombo', 'Kurtarma'];
+    const rows = [...s.players].sort((a, b) => (god ? (god.roundWins[b.id] ?? 0) - (god.roundWins[a.id] ?? 0) : b.score - a.score));
+    const table = h('table', { class: 'final' },
+      h('tr', {}, ...head.map((t) => h('th', { text: t }))),
+      ...rows.map((p) => {
+        const win = winnerNames.length === 1 && winnerNames[0] === p.name;
+        const cells = god
+          ? [`★ ${god.roundWins[p.id] ?? 0}`, String(p.stats.drops), String(p.stats.godTraps)]
+          : [String(p.score), String(totalPops(p)), `x${p.stats.maxCombo}`, String(p.stats.revives)];
+        return h('tr', { class: win ? 'win' : '' },
+          h('td', { text: `${win ? '👑 ' : ''}${p.name}`, style: `color:${cssColor(p.color)}` }),
+          ...cells.map((t) => h('td', { text: t })),
+        );
+      }),
+    );
     let body: HTMLElement;
-    if (s.mode === 'god' && s.god) {
-      const wins = s.god.roundWins;
-      const rows = [...s.players].sort((a, b) => (wins[b.id] ?? 0) - (wins[a.id] ?? 0));
-      const best = wins[rows[0]?.id] ?? 0;
-      const winners = rows.filter((p) => (wins[p.id] ?? 0) === best).length;
-      title = winners > 1 ? 'Berabere!' : 'Maç Bitti';
-      body = h('table', { class: 'final' },
-        ...rows.map((p) =>
-          h('tr', { class: winners === 1 && (wins[p.id] ?? 0) === best ? 'win' : '' },
-            h('td', { text: `${winners === 1 && (wins[p.id] ?? 0) === best ? '👑 ' : ''}${p.name}`, style: `color:${cssColor(p.color)}` }),
-            h('td', { text: `★ ${wins[p.id] ?? 0}` }),
-          ),
+    if (god) body = table;
+    else if (s.mode === 'rain') {
+      body = h('div', { class: 'card-body' },
+        h('div', { class: 'stats' },
+          h('div', {}, h('b', { text: clock(s.timeLeftTicks) }), 'Hayatta kalma'),
+          h('div', {}, h('b', { text: String(teamScore(s)) }), 'Takım skoru'),
         ),
-      );
-    } else if (s.mode === 'rain') {
-      body = h('div', { class: 'stats' },
-        h('div', {}, h('b', { text: clock(s.timeLeftTicks) }), 'Hayatta kalma'),
-        h('div', {}, h('b', { text: String(teamScore(s)) }), 'Takım skoru'),
+        table,
       );
     } else {
       const top = h('div');
@@ -250,8 +297,16 @@ export class GameScene extends Phaser.Scene {
           h('div', {}, h('b', { text: String(s.levelIndex + 1) }), 'Seviye'),
           h('div', {}, h('b', { text: String(teamScore(s)) }), 'Takım skoru'),
         ),
+        table,
         top,
       );
+    }
+    if (this.session.isHost) {
+      try {
+        recordMatch({ game: 'bubble', mode: s.mode, ...matchSummary(s) }).catch((err) => console.warn('recordMatch failed', err));
+      } catch (err) {
+        console.warn('recordMatch failed', err);
+      }
     }
     this.endCard = showEndCard({
       title,
@@ -271,3 +326,12 @@ export class GameScene extends Phaser.Scene {
 }
 
 const teamScore = (s: GameState) => s.players.reduce((n, p) => n + p.score, 0);
+
+/** Turkish accusative with apostrophe ("Veli'yi", "Can'ı"), by last-vowel harmony. */
+export function acc(name: string): string {
+  const V = 'aıoueeiöü';
+  const lower = name.toLowerCase();
+  const v = [...lower].filter((c) => V.includes(c)).pop() ?? 'i';
+  const suf = 'aı'.includes(v) ? 'ı' : 'ei'.includes(v) ? 'i' : 'ou'.includes(v) ? 'u' : 'ü';
+  return `${name}'${V.includes(lower.slice(-1)) ? 'y' : ''}${suf}`;
+}

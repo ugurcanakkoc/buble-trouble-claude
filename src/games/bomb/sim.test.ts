@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BALANCE as B } from './balance';
 import {
-  CRATE, EMPTY_INPUT, FLOOR, SPIRAL, WALL, bombAt, bombSim, createGame, flameAt, idx, setOwnPos, step,
+  CRATE, EMPTY_INPUT, FLOOR, SPIRAL, WALL, bombAt, bombSim, createGame, flameAt, idx, mvp, newRound, setOwnPos, step,
   type BombInput, type BombState,
 } from './sim';
 
@@ -320,5 +320,91 @@ describe('determinism', () => {
     const c = JSON.parse(JSON.stringify(a)) as BombState;
     for (let t = 0; t < 300; t++) step(a, {}), step(c, {});
     expect(JSON.stringify(c)).toBe(JSON.stringify(a));
+  });
+});
+
+describe('kill attribution & stats', () => {
+  it('credits the bomb owner, records suicides and crushes', () => {
+    const s = arena();
+    at(s, 'p0', 7.5, 5.5);
+    const v = at(s, 'p1', 4.5, 1.5);
+    const me = at(s, 'p2', 3.5, 2.5);
+    at(s, 'p3', 11.5, 11.5);
+    bomb(s, 3, 1, 2, 1, 'p0');
+    const ev = run(s, 1);
+    expect(ev.find((e) => e.type === 'death' && e.id === 'p1')).toMatchObject({ by: 'p0', cause: 'bomb', multi: 1 });
+    expect(v.death).toEqual({ by: 'p0', cause: 'bomb', multi: 1 });
+    run(s, B.flameTicks);
+    const p0 = s.players[0];
+    expect(p0.kills).toBe(2); // p1 and p2 in the same blast
+    at(s, 'p3', 11.5, 11.5);
+    bomb(s, 11, 11, 2, 1, 'p3');
+    run(s, 1);
+    expect(s.players[3]).toMatchObject({ alive: false, kills: 0, deaths: 1, suicides: 1, death: { by: 'p3', cause: 'self' } });
+    expect(me.death?.multi).toBe(2);
+  });
+
+  it('chain reactions: multi counts per killer across chained bombs; each flame credits its own bomb', () => {
+    const s = arena();
+    at(s, 'p0', 9.5, 9.5);
+    const a = at(s, 'p1', 3.5, 2.5); // A's flame only
+    const b = at(s, 'p2', 5.5, 2.5); // B's flame only (chained by A)
+    const c = at(s, 'p3', 7.5, 3.5); // C's flame only (chained by B), C owned by someone else
+    bomb(s, 3, 1, 2, 1, 'p0');
+    bomb(s, 5, 1, 2, 999, 'p0');
+    bomb(s, 7, 1, 2, 999, 'p1');
+    // p1 dies first in the same tick, but its bomb still goes off as part of the chain
+    s.bombs[2].fire = 3;
+    run(s, 1);
+    expect(a.death).toEqual({ by: 'p0', cause: 'bomb', multi: 1 });
+    expect(b.death).toMatchObject({ by: 'p0', multi: 2 });
+    expect(c.death).toMatchObject({ by: 'p1', cause: 'bomb', multi: 1 });
+    expect(s.players.map((p) => p.kills)).toEqual([2, 1, 0, 0]);
+  });
+
+  it('teammate kills are attributed but not counted as kills', () => {
+    const s = arena(4, 'team');
+    at(s, 'p0', 7.5, 5.5);
+    const mate = at(s, 'p2', 4.5, 1.5); // p0 and p2 are team 0
+    bomb(s, 3, 1, 2, 1, 'p0');
+    run(s, 1);
+    expect(mate.death).toEqual({ by: 'p0', cause: 'bomb', multi: 0 });
+    expect(s.players[0].kills).toBe(0);
+  });
+
+  it('crush by sudden death', () => {
+    const s = arena(2);
+    const p = at(s, 'p0', 1.5, 1.5);
+    at(s, 'p1', 7.5, 5.5);
+    s.timeLeft = 1;
+    const ev = run(s, 3);
+    expect(ev.find((e) => e.type === 'death')).toMatchObject({ id: 'p0', by: null, cause: 'crush' });
+    expect(p).toMatchObject({ deaths: 1, suicides: 0 });
+  });
+
+  it('counts crates broken and power-ups taken; stats survive rounds, death resets', () => {
+    const s = arena(2);
+    at(s, 'p0', 7.5, 5.5);
+    const p1 = at(s, 'p1', 11.5, 11.5);
+    s.grid[idx(5, 1)] = CRATE;
+    s.grid[idx(3, 3)] = CRATE;
+    bomb(s, 3, 1, 2, 1, 'p0');
+    s.items.push({ c: 11, r: 11, k: 'fire' });
+    run(s, 1);
+    expect(s.players[0].crates).toBe(2);
+    expect(p1.items).toBe(1);
+    p1.death = { by: null, cause: 'crush', multi: 0 };
+    newRound(s);
+    expect(s.players[0].crates).toBe(2);
+    expect(p1.death).toBeNull();
+  });
+
+  it('MVP: most kills, ties broken by fewer deaths; nobody with no kills', () => {
+    const s = arena();
+    expect(mvp(s.players)).toBeNull();
+    Object.assign(s.players[0], { kills: 3, deaths: 2 });
+    Object.assign(s.players[1], { kills: 3, deaths: 1 });
+    Object.assign(s.players[2], { kills: 1, deaths: 0 });
+    expect(mvp(s.players)?.id).toBe('p1');
   });
 });

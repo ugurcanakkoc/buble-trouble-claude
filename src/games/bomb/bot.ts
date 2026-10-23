@@ -18,10 +18,14 @@ interface Pending {
 }
 
 /** Ticks until each cell is covered by flame (0 = burning now, INF = safe). */
-export function dangerMap(s: BombState, extra?: Pending): number[] {
+export function dangerMap(s: BombState, extra?: Pending, viewer?: BPlayer): number[] {
   const d = new Array<number>(N).fill(INF);
   for (const f of s.flames) d[idx(f.c, f.r)] = 0;
-  const bombs: Pending[] = s.bombs.map((b) => ({ c: b.c, r: b.r, fire: b.fire, fuse: b.fuse }));
+  // reaction delay: a bot hasn't "seen" someone else's bomb for its first few ticks
+  const react = viewer ? reactTicks(viewer) : 0;
+  const bombs: Pending[] = s.bombs
+    .filter((b) => !viewer || b.owner === viewer.id || B.fuseTicks - b.fuse >= react)
+    .map((b) => ({ c: b.c, r: b.r, fire: b.fire, fuse: b.fuse }));
   if (extra) bombs.push(extra);
   const blasts = bombs.map((b) => blastCells(s, b.c, b.r, b.fire).cells);
   for (let changed = true, n = 0; changed && n < 12; n++) {
@@ -80,6 +84,16 @@ function bfs(s: BombState, start: number, danger: number[], speed: number, safeO
   return { dist, prev, order };
 }
 
+/** 150–250 ms depending on the slot, so bots don't all react in lockstep. */
+export const reactTicks = (p: BPlayer) => 9 + ((p.slot * 7) % 4) * 2;
+
+/** Deterministic per-bot coin in [0,1) that changes every ~0.75 s (no sim rng consumed). */
+function whim(s: BombState, p: BPlayer, salt: number): number {
+  let h = Math.imul(Math.floor(s.tick / 45) * 4 + p.slot, 0x9e3779b1) ^ Math.imul(salt + 1, 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
+  return ((h ^ (h >>> 13)) >>> 0) / 4294967296;
+}
+
 function firstStep(prev: number[], start: number, target: number): number {
   let t = target;
   while (prev[t] !== start && prev[t] >= 0) t = prev[t];
@@ -97,7 +111,7 @@ function decide(s: BombState, p: BPlayer): BombInput {
   const [c, r] = cellOf(p);
   const me = idx(c, r);
   const speed = speedOf(p);
-  const danger = dangerMap(s);
+  const danger = dangerMap(s, undefined, p);
   const enemies = s.players.filter((q) => q.alive && side(s, q) !== side(s, p));
   const enemyCells = new Set(enemies.map((q) => idx(...cellOf(q))));
 
@@ -108,7 +122,7 @@ function decide(s: BombState, p: BPlayer): BombInput {
     return score;
   };
   const canEscape = (cc: number, rr: number) => {
-    const d2 = dangerMap(s, { c: cc, r: rr, fire: p.fire, fuse: B.fuseTicks });
+    const d2 = dangerMap(s, { c: cc, r: rr, fire: p.fire, fuse: B.fuseTicks }, p);
     // stricter than fleeing: the timing model is rough, so only bomb with room to spare
     const sr = bfs(s, idx(cc, rr), d2, speed, false, 30);
     return sr.order.some((j) => d2[j] >= INF);
@@ -127,7 +141,10 @@ function decide(s: BombState, p: BPlayer): BombInput {
 
   const canBomb =
     p.curse !== 'nobomb' && !bombAt(s, c, r) && s.bombs.filter((b) => b.owner === p.id).length < p.bombs;
-  if (canBomb && hits(c, r) > 0 && canEscape(c, r)) {
+  // hesitation: ~1 in 4 windows a bot passes up a shot at an enemy (crates are still bombed)
+  const hesitant = whim(s, p, 1) < 0.25;
+  const h0 = hits(c, r);
+  if (canBomb && h0 > 0 && !(hesitant && h0 >= 5) && canEscape(c, r)) {
     inp.bomb = true;
     inp.seq = p.seq + 1;
     return inp;
@@ -150,7 +167,9 @@ function decide(s: BombState, p: BPlayer): BombInput {
       if (h > 0 && h * 2 - sr.dist[j] > bestScore) [best, bestScore] = [j, h * 2 - sr.dist[j]];
     }
   }
-  // 3) hunt: get as close as possible to an enemy
+  // 3) hunt: get as close as possible to an enemy (sometimes it just wanders instead)
+  const w = whim(s, p, 2);
+  if (best < 0 && enemies.length && w < 0.15 && reach.length > 1) best = reach[1 + Math.floor(whim(s, p, 3) * (reach.length - 1))];
   if (best < 0 && enemies.length) {
     for (const j of reach) {
       const jc = j % COLS;

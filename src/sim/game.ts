@@ -1,5 +1,5 @@
 import type { GameMode, GameState, InputState, Player, PlayerId, PlayerInfo, SimEvent } from './types';
-import { EMPTY_INPUT, TICK_RATE } from './types';
+import { EMPTY_INPUT, TICK_RATE, newStats } from './types';
 import { BALL_VX } from './balls';
 import { resetFighters, setPhase, worldTick } from './fighters';
 import { godStep, initGodMode } from './god';
@@ -16,10 +16,10 @@ export const BALL_COLORS = [0xe53935, 0x1e88e5, 0x43a047, 0xfdd835, 0x8e24aa, 0x
 export function createGame(seed: number, players: PlayerInfo[], levelIndex = 0, mode: GameMode = 'classic'): GameState {
   const s: GameState = {
     tick: 0, rng: seed | 0, levelIndex, phase: 'ready', phaseUntil: 0, timeLeftTicks: 0, lives: START_LIVES,
-    freezeUntil: 0, nextId: 1, balls: [], projectiles: [], powerUps: [], blocks: [], mode, god: null,
+    freezeUntil: 0, nextId: 1, balls: [], projectiles: [], powerUps: [], blocks: [], mode, god: null, timeBonus: 0,
     players: players.map((p): Player => ({
       id: p.id, name: p.name, color: p.color, x: 0, y: 0, facing: 1, weapon: 'harpoon', shield: false, score: 0,
-      invulnUntil: 0, connected: true, fireHeld: false, nextFireTick: 0, trapped: false, combo: 0, comboUntil: 0,
+      invulnUntil: 0, connected: true, fireHeld: false, nextFireTick: 0, trapped: false, combo: 0, comboUntil: 0, stats: newStats(),
     })),
   };
   if (mode === 'classic') loadLevel(s, levelIndex, []);
@@ -39,11 +39,20 @@ function loadLevel(s: GameState, index: number, events: SimEvent[]): void {
   s.projectiles = [];
   s.powerUps = [];
   s.freezeUntil = 0;
+  s.timeBonus = 0;
   s.timeLeftTicks = def.timeSeconds * TICK_RATE;
   resetFighters(s.players);
   placePlayers(s.players.filter((p) => p.connected));
   setPhase(s, 'ready', READY_TICKS);
   events.push({ type: 'levelStart', levelIndex: index });
+}
+
+export const TIME_BONUS_PER_SEC = 10;
+
+/** Seconds left x 10 points, credited to every free (not trapped) player. */
+function awardTimeBonus(s: GameState, active: Player[]): void {
+  s.timeBonus = Math.floor(s.timeLeftTicks / TICK_RATE) * TIME_BONUS_PER_SEC;
+  for (const p of active) if (!p.trapped) p.score += s.timeBonus;
 }
 
 function loseLife(s: GameState, event: SimEvent, events: SimEvent[]): void {
@@ -77,6 +86,7 @@ function classicStep(s: GameState, active: Player[], input: (p: Player) => Input
       const lastTrapped = worldTick(s, active, input, events);
       if (lastTrapped !== null) loseLife(s, { type: 'hit', playerId: lastTrapped }, events);
       else if (s.balls.length === 0) {
+        awardTimeBonus(s, active);
         setPhase(s, 'levelComplete', COMPLETE_TICKS);
         events.push({ type: 'levelComplete', levelIndex: s.levelIndex });
       } else if (--s.timeLeftTicks <= 0) loseLife(s, { type: 'timeout' }, events);

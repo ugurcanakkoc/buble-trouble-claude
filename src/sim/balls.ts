@@ -54,7 +54,11 @@ export function popBall(s: GameState, ball: Ball, playerId: string, events: SimE
     owner.comboUntil = s.tick + COMBO_TICKS;
   }
   const points = BALL_SCORE[ball.size] * combo;
-  if (owner) owner.score += points;
+  if (owner) {
+    owner.score += points;
+    owner.stats.pops[ball.size]++;
+    owner.stats.maxCombo = Math.max(owner.stats.maxCombo, combo);
+  }
   events.push({ type: 'pop', x: ball.x, y: ball.y, size: ball.size, playerId, points, combo });
   if (ball.size > 0) {
     const size = (ball.size - 1) as BallSize;

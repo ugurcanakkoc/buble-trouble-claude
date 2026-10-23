@@ -116,8 +116,8 @@ export class MenuScene extends Phaser.Scene {
     code.addEventListener('keydown', (e) => e.key === 'Enter' && join.click());
     name.addEventListener('keydown', (e) => e.key === 'Enter' && create.click());
 
-    const board = createBoardPanel();
-    const best = h('button', { class: 'btn ghost', text: '🏆 Balon Avı rekorları', onclick: () => board.open() });
+    const board = createBoardPanel({ game: () => picked, user: () => name.value.trim() || load(NAME_KEY) || '' });
+    const best = h('button', { class: 'btn ghost', text: '🏆 Skor Tablosu', onclick: () => board.open() });
 
     const unmountBoard = mount(board.el);
     const unmount = mount(
