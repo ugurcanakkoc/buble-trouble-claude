@@ -105,6 +105,20 @@ describe('GameLoop host', () => {
     expect(s.sendInput).not.toHaveBeenCalled();
   });
 
+  it('takes a client-reported x, but not for trapped players or keepalives', () => {
+    const { s, emit } = fakeSession(true);
+    const loop = new GameLoop(s, fakeSim().sim);
+    emit('start', payload);
+    const c = () => loop.state!.players.find((p) => p.id === 'c')!;
+    emit('input', 'c', IDLE, 444);
+    expect(c().x).toBe(444);
+    emit('input', 'c', IDLE, undefined);
+    expect(c().x).toBe(444);
+    c().trapped = true;
+    emit('input', 'c', IDLE, 10);
+    expect(c().x).toBe(444);
+  });
+
   it('marks players that left presence as disconnected', () => {
     const { s, emit } = fakeSession(true);
     const loop = new GameLoop(s, fakeSim().sim);
@@ -141,26 +155,45 @@ describe('GameLoop client', () => {
     expect(calls[0].h).toEqual(IDLE);
   });
 
-  it('reconciles softly: keeps own x within 24 units, snaps beyond', () => {
+  it('keeps own x (client-authoritative) unless far off or trapped', () => {
     const { s, emit } = fakeSession(false);
     const loop = new GameLoop(s, fakeSim().sim);
     emit('start', payload);
     const localX = loop.state!.players.find((p) => p.id === 'c')!.x;
 
     const near = mkState(payload.players);
-    near.players[1].x = localX + 20;
+    near.players[1].x = localX + 100;
     near.players[0].x = 555;
     emit('snapshot', near);
     expect(loop.state!.players[1].x).toBe(localX);
     expect(loop.state!.players[0].x).toBe(555); // others always taken from snapshot
 
     const far = mkState(payload.players);
-    far.players[1].x = localX + 30;
+    far.players[1].x = localX + 150;
     emit('snapshot', far);
-    expect(loop.state!.players[1].x).toBe(localX + 30);
+    expect(loop.state!.players[1].x).toBe(localX + 150);
+
+    const trapped = mkState(payload.players);
+    trapped.players[1].x = localX + 160;
+    trapped.players[1].trapped = true;
+    emit('snapshot', trapped);
+    expect(loop.state!.players[1].x).toBe(localX + 160);
   });
 
-  it('keeps my own god cloud x (within 60) and charge across snapshots', () => {
+  it('sends own x with input changes and predicts others with snapshot inputs', () => {
+    const { s, emit } = fakeSession(false);
+    const { sim, calls } = fakeSim();
+    const loop = new GameLoop(s, sim);
+    emit('start', payload);
+    loop.state!.players[1].x = 321;
+    loop.setLocalInput({ ...IDLE, right: true });
+    expect(s.sendInput).toHaveBeenLastCalledWith({ ...IDLE, right: true }, 321);
+    emit('snapshot', mkState(payload.players), { h: { ...IDLE, left: true } });
+    loop.update(STEP_MS);
+    expect(calls.at(-1)!.h).toEqual({ ...IDLE, left: true });
+  });
+
+  it('keeps my own god cloud x (unless far off) and charge across snapshots', () => {
     const { s, emit } = fakeSession(false);
     const loop = new GameLoop(s, fakeSim().sim);
     emit('start', payload);
@@ -170,14 +203,14 @@ describe('GameLoop client', () => {
     });
     loop.state!.god = god(300, 2);
     const near = mkState(payload.players);
-    near.god = god(340, -1);
+    near.god = god(450, -1);
     emit('snapshot', near);
     expect(loop.state!.god!.x).toBe(300);
     expect(loop.state!.god!.charge).toBe(2);
     const far = mkState(payload.players);
-    far.god = god(400, -1);
+    far.god = god(520, -1);
     emit('snapshot', far);
-    expect(loop.state!.god!.x).toBe(400);
+    expect(loop.state!.god!.x).toBe(520);
   });
 
   it('synthesizes pop events for balls that disappeared in a snapshot', () => {

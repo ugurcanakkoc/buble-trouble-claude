@@ -1,0 +1,9 @@
+{
+  "name": "Bubble Online",
+  "short_name": "Bubble",
+  "start_url": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0d1020",
+  "theme_color": "#0d1020"
+}

@@ -30,8 +30,8 @@ function open(code: string, key: string) {
   const hub = {
     onSync: () => {},
     start: listeners<[StartPayload]>(),
-    input: listeners<[PlayerId, InputState]>(),
-    snap: listeners<[GameState]>(),
+    input: listeners<[PlayerId, InputState, number | undefined]>(),
+    snap: listeners<[GameState, Record<PlayerId, InputState>]>(),
   };
   let onFirstSync!: () => void;
   const synced = new Promise<void>((r) => (onFirstSync = r));
@@ -41,10 +41,13 @@ function open(code: string, key: string) {
   });
   // broadcast payloads are untyped at the supabase boundary; we trust our own peers
   ch.on('broadcast', { event: 'start' }, (m) => hub.start.emit(m.payload as StartPayload));
-  ch.on('broadcast', { event: 'snapshot' }, (m) => hub.snap.emit(m.payload as GameState));
+  ch.on('broadcast', { event: 'snapshot' }, (m) => {
+    const p = m.payload as { state: GameState; inputs: Record<PlayerId, InputState> };
+    hub.snap.emit(p.state, p.inputs ?? {});
+  });
   ch.on('broadcast', { event: 'input' }, (m) => {
-    const p = m.payload as { playerId: PlayerId; input: InputState };
-    hub.input.emit(p.playerId, p.input);
+    const p = m.payload as { playerId: PlayerId; input: InputState; x?: number };
+    hub.input.emit(p.playerId, p.input, p.x);
   });
   const subscribed = new Promise<void>((res, rej) =>
     ch.subscribe((status) => {
@@ -103,12 +106,13 @@ function makeSession(ch: RealtimeChannel, hub: Hub, code: string, meta: Presence
       send('start', payload);
       startL.emit(payload); // self broadcast is off
     },
-    sendSnapshot: (state) => send('snapshot', state),
+    sendSnapshot: (state, inputs) => send('snapshot', { state, inputs }),
     onInput: inputL.add,
     onStart: startL.add,
-    sendInput(input) {
+    sendInput(input, x) {
       lastInput = input;
-      send('input', { playerId: self.id, input });
+      send('input', { playerId: self.id, input, x });
+      // keepalive omits x: a stale position would yank the player back on the host
       keepalive ??= setInterval(() => send('input', { playerId: self.id, input: lastInput }), KEEPALIVE_MS);
     },
     onSnapshot: snapL.add,

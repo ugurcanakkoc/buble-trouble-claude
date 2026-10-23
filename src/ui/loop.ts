@@ -6,8 +6,13 @@ import type { RoomSession, StartPayload } from '../net';
 export const STEP_MS = 1000 / 60;
 export const MAX_STEPS_PER_FRAME = 5;
 export const SNAPSHOT_EVERY = 8; // ticks -> 7.5 Hz (keeps 4 players under the 100 msg/s budget)
-export const RECONCILE_X = 24;
-export const RECONCILE_CLOUD_X = 60;
+// Clients own their movement (they send x with each input change), so a snapshot only overrides
+// their x when it is far off: level reset, trap, or a lost message.
+export const RECONCILE_X = 120;
+export const RECONCILE_CLOUD_X = 200;
+// A snapshot is ~65 ms old on arrival (measured one-way latency): replay this many ticks on top of
+// it so balls don't visibly jump back on every snapshot.
+export const SNAPSHOT_LEAD_TICKS = 4;
 
 const NO_INPUT = EMPTY_INPUT;
 
@@ -32,6 +37,20 @@ export function startPayload(session: RoomSession, levelIndex = 0, mode: GameMod
   };
 }
 
+/** The position a player controls: their floor x, or the cloud x while they are the god. */
+function ownX(state: GameState, id: PlayerId): number {
+  if (state.god?.godId === id) return state.god.x;
+  return state.players.find((p) => p.id === id)?.x ?? 0;
+}
+
+function setOwnX(state: GameState, id: PlayerId, x: number, floorOnly = false): void {
+  if (state.god?.godId === id && !floorOnly) state.god.x = x;
+  else {
+    const p = state.players.find((q) => q.id === id);
+    if (p && !p.trapped) p.x = x;
+  }
+}
+
 export class GameLoop {
   state: GameState | null = null;
   private acc = 0;
@@ -50,7 +69,12 @@ export class GameLoop {
     const s = session;
     this.offs.push(s.onStart((p) => this.start(p)));
     if (s.isHost) {
-      this.offs.push(s.onInput((id, input) => (this.remote[id] = input)));
+      this.offs.push(
+        s.onInput((id, input, x) => {
+          this.remote[id] = input;
+          if (x !== undefined && this.state) setOwnX(this.state, id, x);
+        }),
+      );
       this.offs.push(
         s.onPlayersChange((list) => {
           if (!this.state) return;
@@ -59,7 +83,12 @@ export class GameLoop {
         }),
       );
     } else {
-      this.offs.push(s.onSnapshot((snap) => this.applySnapshot(snap)));
+      this.offs.push(
+        s.onSnapshot((snap, inputs) => {
+          this.remote = inputs ?? {};
+          this.applySnapshot(snap);
+        }),
+      );
       this.offs.push(s.onHostLeft(onHostLeft));
     }
   }
@@ -82,7 +111,7 @@ export class GameLoop {
 
   private send(): void {
     this.lastSent = this.local; // keepalive resends are handled inside the net layer
-    this.session.sendInput(this.local);
+    this.session.sendInput(this.local, this.state ? ownX(this.state, this.selfId) : 0);
   }
 
   /** Advance by a frame delta (ms). Returns sim/synthesized events produced during this frame. */
@@ -99,7 +128,7 @@ export class GameLoop {
       n++;
       events.push(...this.sim.step(state, this.inputs(state)));
       this.steps++;
-      if (this.session.isHost && this.steps % SNAPSHOT_EVERY === 0) this.session.sendSnapshot(state);
+      if (this.session.isHost && this.steps % SNAPSHOT_EVERY === 0) this.session.sendSnapshot(state, this.inputs(state));
     }
     if (this.acc >= STEP_MS) this.acc = 0; // too far behind (tab was hidden): drop the backlog
     return events;
@@ -108,22 +137,24 @@ export class GameLoop {
   private inputs(state: GameState): Record<PlayerId, InputState> {
     const out: Record<PlayerId, InputState> = {};
     for (const p of state.players) {
-      // host: latest received input per remote player; client: others assumed idle
-      out[p.id] = p.id === this.selfId ? this.local : this.session.isHost ? this.remote[p.id] ?? NO_INPUT : NO_INPUT;
+      // host: latest received input per player; client: others' inputs as of the last snapshot
+      out[p.id] = p.id === this.selfId ? this.local : this.remote[p.id] ?? NO_INPUT;
     }
     return out;
   }
 
   applySnapshot(snap: GameState): void {
     const prev = this.state;
+    let keepX: number | null = null;
+    let keepCloudX: number | null = null;
     if (prev) {
       const mine = prev.players.find((p) => p.id === this.selfId);
       const theirs = snap.players.find((p) => p.id === this.selfId);
-      if (mine && theirs && Math.abs(mine.x - theirs.x) < RECONCILE_X) theirs.x = mine.x;
+      if (mine && theirs && !theirs.trapped && Math.abs(mine.x - theirs.x) < RECONCILE_X) keepX = mine.x;
       // Same for my god cloud (it moves faster, so a wider window), and keep my own charge
       // so hold-to-grow feedback isn't reset by every lagging snapshot.
       if (prev.god && snap.god && snap.god.godId === this.selfId && prev.god.godId === this.selfId) {
-        if (Math.abs(prev.god.x - snap.god.x) < RECONCILE_CLOUD_X) snap.god.x = prev.god.x;
+        if (Math.abs(prev.god.x - snap.god.x) < RECONCILE_CLOUD_X) keepCloudX = prev.god.x;
         snap.god.charge = prev.god.charge;
         snap.god.chargeStart = prev.god.chargeStart;
       }
@@ -137,6 +168,10 @@ export class GameLoop {
         }
       }
     }
+    // fast-forward to "now", then put my own (client-authoritative) position back on top
+    if (snap.phase === 'playing') for (let i = 0; i < SNAPSHOT_LEAD_TICKS; i++) this.sim.step(snap, this.inputs(snap));
+    if (keepX !== null) setOwnX(snap, this.selfId, keepX, true);
+    if (keepCloudX !== null && snap.god) snap.god.x = keepCloudX;
     this.state = snap;
   }
 

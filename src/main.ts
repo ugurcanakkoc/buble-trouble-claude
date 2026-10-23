@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import './ui/overlay.css';
 import { mountMuteButton } from './ui/audio';
 import { h } from './ui/dom';
+import { mountFullscreen } from './ui/fullscreen';
 import { mountSettingsButton } from './ui/settings';
 import { GameScene } from './ui/scenes/GameScene';
 import { LobbyScene } from './ui/scenes/LobbyScene';
@@ -27,6 +28,7 @@ async function boot() {
 
   mountMuteButton();
   mountSettingsButton();
+  mountFullscreen();
   document.body.append(
     h('div', { class: 'rotate' }, h('div', { class: 'phone', text: '📱' }), h('div', { text: 'Telefonu yan çevir' })),
   );

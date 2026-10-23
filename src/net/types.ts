@@ -25,15 +25,17 @@ export interface RoomSession {
 
   // host only
   startGame(payload: StartPayload): void;
-  sendSnapshot(state: GameState): void; // ~7.5 Hz (every 8 ticks)
-  onInput(cb: (playerId: PlayerId, input: InputState) => void): () => void;
+  // ~7.5 Hz (every 8 ticks); inputs = latest input per player so clients can predict others' movement
+  sendSnapshot(state: GameState, inputs: Record<PlayerId, InputState>): void;
+  // x = sender's own player x when the input changed (client-authoritative movement); absent on keepalives
+  onInput(cb: (playerId: PlayerId, input: InputState, x: number | undefined) => void): () => void;
 
   // everyone (host receives its own start via a local callback too)
   onStart(cb: (payload: StartPayload) => void): () => void;
 
   // clients only
-  sendInput(input: InputState): void; // call only when input changed (+ keepalive every 3s)
-  onSnapshot(cb: (state: GameState) => void): () => void;
+  sendInput(input: InputState, x: number): void; // call only when input changed (+ keepalive every 3s)
+  onSnapshot(cb: (state: GameState, inputs: Record<PlayerId, InputState>) => void): () => void;
   onHostLeft(cb: () => void): () => void;
 
   leave(): Promise<void>;

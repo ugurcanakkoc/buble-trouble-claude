@@ -101,6 +101,24 @@ canvas { display: block; }
   .field { padding: 9px 14px; }
   .code-big { font-size: 56px; }
 }
+/* phones in landscape (~390px tall): drop decorations so menu/lobby fit without scrolling */
+@media (max-height: 430px) {
+  .screen { padding: 8px; }
+  .card { padding: 10px 16px 12px; gap: 7px; border-radius: 20px; box-shadow: 0 6px 0 #090b18; }
+  .title { font-size: 28px; }
+  .subtitle, .label { display: none; }
+  .btn { min-height: 42px; padding: 6px 14px; font-size: 19px; box-shadow: 0 4px 0 #0006; }
+  .btn.big { font-size: 21px; min-height: 46px; }
+  .field { padding: 6px 12px; font-size: 19px; }
+  .divider, .hint, .error { font-size: 14px; }
+  .error { min-height: 0; }
+  .code-big { font-size: 44px; letter-spacing: 8px; }
+  .players { gap: 4px; }
+  .players li { font-size: 18px; padding: 5px 12px; }
+  .mode { min-height: 70px; padding: 6px 4px; }
+  .mode .icon { font-size: 22px; }
+  .mode small { display: none; }
+}
 
 /* in-game end overlay */
 .endcard { background: rgba(13, 16, 32, .82); backdrop-filter: blur(3px); }
@@ -138,6 +156,7 @@ canvas { display: block; }
 
 /* settings */
 .gear { right: 66px; font-size: 24px; color: var(--text); }
+.fs { right: 122px; font-size: 24px; color: var(--text); }
 .settings { position: fixed; z-index: 60; background: rgba(13, 16, 32, .7); }
 .settings[hidden], .board[hidden] { display: none; }
 .title.small { font-size: 34px; }
