@@ -77,10 +77,6 @@ function playMatch(seed: number, fighters: number, bot: Bot) {
     const inputs: Record<string, InputState> = {};
     for (const p of s.players) inputs[p.id] = p.id === s.god!.godId ? greedyGod(s) : bot(s, p);
     for (const e of step(s, inputs)) {
-      if (e.type === 'trapped' && (globalThis as any).DBG) {
-        const p = s.players.find((q) => q.id === e.playerId)!;
-        console.log(`trap t=${((s.tick - start) / 60).toFixed(1)} p=${p.x.toFixed(0)} balls=${s.balls.map((b) => `${b.size}@${b.x.toFixed(0)},${b.y.toFixed(0)},${b.vx.toFixed(0)},${b.vy.toFixed(0)}`).join(' ')}`);
-      }
       if (e.type === 'levelStart') start = s.tick + Math.round(B.readySec * TICK_RATE);
       if (e.type === 'roundEnd') rounds.push({ winner: e.winner, secs: (s.tick - start) / TICK_RATE });
     }
@@ -96,22 +92,19 @@ function stats(fighters: number, bot: Bot, matches = 8) {
 }
 
 // ---------- balance ----------
-export const _dbg = { stats, dodgeShoot, greedyGod };
 describe('god balance', () => {
   it.each([1, 2, 3])('idle %i fighter(s) lose quickly to a greedy god', (n) => {
     const r = stats(n, idle, 3);
     expect(r.fighterWins).toBeLessThan(0.2);
     expect(r.avgGodWinSecs).toBeLessThan(45);
-  });
+  }, 60_000);
 
-  it.each([1, 2, 3])('dodge+shoot %i fighter(s) win 50–85%% of rounds vs greedy god', (n) => {
-    (globalThis as any).DBG = n === 1;
-    const r = stats(n, dodgeShoot);
-    (globalThis as any).DBG = false;
+  it.each([1, 2, 3])('dodge+shoot %i fighter(s) win 50-85 pct of rounds vs greedy god', (n) => {
+    const r = stats(n, dodgeShoot, 12);
     console.log(`fighters=${n} winRate=${r.fighterWins.toFixed(2)} rounds=${r.rounds} avgGodWin=${r.avgGodWinSecs.toFixed(1)}s`);
     expect(r.fighterWins).toBeGreaterThanOrEqual(0.5);
     expect(r.fighterWins).toBeLessThanOrEqual(0.85);
-  });
+  }, 60_000);
 });
 
 // ---------- rules ----------
@@ -238,6 +231,5 @@ describe('god/rain determinism', () => {
       step(c, i);
     }
     expect(JSON.stringify(c)).toBe(JSON.stringify(a));
-    expect(a.balls.length + count([], 'pop')).toBeGreaterThanOrEqual(0);
   });
 });

@@ -7,7 +7,7 @@ export const GOD_BALANCE = {
   manaStart: 3,
   manaCap: 10,
   manaRegen: 1.0, // mana/s before factors
-  fighterFactor: [0.6, 0.6, 0.85, 1.0, 1.15], // by fighter count (index clamped)
+  fighterFactor: [0.6, 0.6, 1.6, 1.7, 1.9], // by fighter count (index clamped); tuned vs dodge bot
   rampMax: 1.6, // god: regen multiplier reached at round end (linear)
   cost: [1, 2, 4, 8], // mana by ball size
   cooldownSec: 1.5,
