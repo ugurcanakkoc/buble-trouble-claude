@@ -74,6 +74,29 @@ export function playNoise({ dur, vol = 0.4, filter = 1000, delay = 0 }: NoiseSpe
   src.start(c.currentTime + delay);
 }
 
+/** Decode an audio file with the shared context (null if audio is unavailable). */
+export async function loadBuffer(url: string): Promise<AudioBuffer | null> {
+  const c = ac();
+  if (!c) return null;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url}: ${res.status}`);
+  return c.decodeAudioData(await res.arrayBuffer());
+}
+
+/** Play a decoded clip through the master gain; returns the source (null while muted/locked). */
+export function playBuffer(buf: AudioBuffer, rate = 1, vol = 1): AudioBufferSourceNode | null {
+  const c = ac();
+  if (!c || !master || muted || c.state !== 'running') return null;
+  const src = c.createBufferSource();
+  src.buffer = buf;
+  src.playbackRate.value = rate;
+  const g = c.createGain();
+  g.gain.value = vol;
+  src.connect(g).connect(master);
+  src.start();
+  return src;
+}
+
 const tone = (type: OscillatorType, freq: number, slideTo: number, dur: number, vol = 0.3, delay = 0) =>
   playTone({ type, freq, slideTo, dur, vol, delay });
 const noise = (dur: number, vol: number, filter: number) => playNoise({ dur, vol, filter });

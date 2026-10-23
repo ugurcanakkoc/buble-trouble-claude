@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { BALL_RADIUS, PLAYER_H, type Ball, type GameState, type Player, type PowerUp } from '../../sim';
-import { FONT, PLAYER_TEX_H, RES, ballTexture, hex, playerTexture, powerTexture } from '../textures';
+import { type Face, FONT, PLAYER_TEX_H, RES, ballTexture, hex, playerTexture, powerTexture } from '../textures';
 import { Pool } from './pool';
 import type { Smoother } from './smooth';
 
@@ -9,7 +9,12 @@ class PlayerView extends Phaser.GameObjects.Container {
   private shield: Phaser.GameObjects.Graphics;
   private bubble: Phaser.GameObjects.Graphics;
   private help: Phaser.GameObjects.Text;
+  private say: Phaser.GameObjects.Container;
   private shouting = false;
+  private face: Face = 'normal';
+  private wasTrapped = false;
+  private happyUntil = 0;
+  private popAt = 0;
 
   constructor(scene: Phaser.Scene, p: Player) {
     super(scene);
@@ -24,12 +29,22 @@ class PlayerView extends Phaser.GameObjects.Container {
     this.bubble = scene.add.graphics();
     this.help = scene.add
       .text(0, -PLAYER_TEX_H - 34, 'Kurtar!', {
-        fontFamily: FONT, fontSize: '24px', fontStyle: '700', color: '#fff6a8',
-        stroke: '#a3204f', strokeThickness: 5, resolution: 2,
+        fontFamily: FONT, fontSize: '20px', fontStyle: '700', color: '#fff6a8',
+        stroke: '#a3204f', strokeThickness: 4, resolution: 2,
       })
       .setOrigin(0.5, 1)
       .setVisible(false);
-    this.add([this.shield, this.img, this.bubble, label, this.help]);
+    const t = scene.add
+      .text(0, -9, 'Yardım et!', { fontFamily: FONT, fontSize: '17px', fontStyle: '700', color: '#1b1030', resolution: 2 })
+      .setOrigin(0.5, 1);
+    const w = t.width + 18, h = t.height + 6;
+    const g = scene.add.graphics();
+    g.fillStyle(0xffffff, 0.96).lineStyle(2, 0x8a7fb0, 0.9);
+    g.fillRoundedRect(-w / 2, -6 - h, w, h, 9).strokeRoundedRect(-w / 2, -6 - h, w, h, 9);
+    g.fillTriangle(-5, -7, 5, -7, 0, 0).lineBetween(-5, -6, 0, 0).lineBetween(5, -6, 0, 0);
+    t.y = -6 - 3;
+    this.say = scene.add.container(0, -PLAYER_TEX_H - 30, [g, t]).setVisible(false);
+    this.add([this.shield, this.img, this.bubble, label, this.help, this.say]);
     this.setDepth(5);
     scene.add.existing(this);
   }
@@ -41,14 +56,23 @@ class PlayerView extends Phaser.GameObjects.Container {
     this.img.setFlipX(p.facing < 0);
     // walk bob, blink while invulnerable, float when trapped
     this.img.y = p.trapped ? -6 + Math.sin(time / 260) * 3 : moving ? -Math.abs(Math.sin(time / 70)) * 3 : 0;
+    if (this.wasTrapped && !p.trapped) this.happyUntil = time + 1200;
+    this.wasTrapped = p.trapped;
+    const face = p.trapped ? 'scared' : time < this.happyUntil ? 'happy' : s.tick < p.invulnUntil ? 'dizzy' : 'normal';
+    if (face !== this.face) {
+      this.face = face;
+      this.img.setTexture(playerTexture(this.scene, p.color, face));
+    }
     this.img.setAlpha(p.invulnUntil > s.tick && (s.tick >> 2) % 2 ? 0.35 : 1);
     this.bubble.clear();
-    this.help.setVisible(p.trapped);
     const shouting = p.trapped && s.tick < p.helpUntil;
-    if (shouting !== this.shouting) {
-      this.shouting = shouting;
-      if (shouting) this.help.setText('Yardım et!').setColor('#1b1030').setStroke('#ffffff', 0).setBackgroundColor('#ffffff').setPadding(10, 6, 10, 6);
-      else this.help.setText('Kurtar!').setColor('#fff6a8').setStroke('#a3204f', 5).setBackgroundColor('rgba(0,0,0,0)').setPadding(0);
+    if (shouting && !this.shouting) this.popAt = time;
+    this.shouting = shouting;
+    this.help.setVisible(p.trapped && !shouting);
+    this.say.setVisible(shouting);
+    if (shouting) {
+      const k = Math.min(1, (time - this.popAt) / 220);
+      this.say.setScale(1 + 2.7 * Math.pow(k - 1, 3) + 1.7 * Math.pow(k - 1, 2) - (k < 1 ? 0 : 0)).setRotation(Math.sin(time / 140) * 0.06);
     }
     if (p.trapped) {
       const cy = -PLAYER_H / 2 - 6 + Math.sin(time / 260) * 3;

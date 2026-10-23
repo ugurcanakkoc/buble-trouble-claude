@@ -149,7 +149,7 @@ export class GameScene extends Phaser.Scene {
     this.controls.setFireLabel(me?.trapped ? 'YARDIM' : 'ATEŞ');
     for (const p of s.players) {
       const prev = this.lastHelp.get(p.id) ?? 0;
-      if (p.helpUntil > s.tick && p.helpUntil > prev + HELP_TICKS / 2) squeak('Yardım et! Yardım et!');
+      if (p.helpUntil > s.tick && p.helpUntil > prev + HELP_TICKS / 2) squeak();
       this.lastHelp.set(p.id, p.helpUntil);
     }
     this.blocks.update(s.blocks);

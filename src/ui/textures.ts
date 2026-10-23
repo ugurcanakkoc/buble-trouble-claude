@@ -67,10 +67,85 @@ export function ballTexture(scene: Phaser.Scene, size: BallSize, color: number):
 export const PLAYER_TEX_W = PLAYER_W + 16;
 export const PLAYER_TEX_H = PLAYER_H + 8;
 
-export function playerTexture(scene: Phaser.Scene, color: number): string {
+export type Face = 'normal' | 'scared' | 'happy' | 'dizzy';
+
+function face(g: CanvasRenderingContext2D, expr: Face, cx: number, top: number, bw: number) {
+  const ink = '#1b1030';
+  const ey = top + 14;
+  g.lineCap = 'round';
+  for (const dx of [-0.16, 0.2]) {
+    const ex = cx + dx * bw + 2;
+    const dot = (x: number, y: number, r: number, c: string) => {
+      g.fillStyle = c;
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.fill();
+    };
+    const white = (ry: number) => {
+      g.fillStyle = '#fff';
+      g.beginPath();
+      g.ellipse(ex, ey, 5.2, ry, 0, 0, Math.PI * 2);
+      g.fill();
+    };
+    g.strokeStyle = ink;
+    g.lineWidth = 1.8;
+    if (expr === 'happy') {
+      g.beginPath(); // ^ eye
+      g.arc(ex, ey + 3, 4.5, Math.PI * 1.1, Math.PI * 1.9);
+      g.stroke();
+    } else if (expr === 'dizzy') {
+      g.lineWidth = 2.2;
+      g.beginPath(); // X eye
+      g.moveTo(ex - 3.5, ey - 3.5); g.lineTo(ex + 3.5, ey + 3.5);
+      g.moveTo(ex + 3.5, ey - 3.5); g.lineTo(ex - 3.5, ey + 3.5);
+      g.stroke();
+    } else if (expr === 'scared') {
+      white(7.4);
+      dot(ex + 0.5, ey + 1, 1.7, ink);
+      dot(ex + 1, ey, 0.6, '#fff');
+      g.lineWidth = 1.6;
+      g.beginPath(); // worried brow, inner end up
+      const inner = dx < 0 ? 1 : -1;
+      g.moveTo(ex - inner * 5, ey - 10); g.lineTo(ex + inner * 5, ey - 13);
+      g.stroke();
+    } else {
+      white(6.4);
+      dot(ex + 2, ey + 1, 2.8, ink);
+      dot(ex + 2.8, ey - 0.4, 1, '#fff');
+    }
+  }
+  g.strokeStyle = ink;
+  g.fillStyle = ink;
+  g.lineWidth = 1.8;
+  g.beginPath();
+  if (expr === 'happy') { // big open smile
+    g.arc(cx + 4, top + 20, 6, 0.1, Math.PI - 0.1);
+    g.closePath();
+    g.fill();
+  } else if (expr === 'scared') { // tiny "o"
+    g.ellipse(cx + 4, top + 25, 2.6, 3.2, 0, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#7fd4ff'; // sweat drop
+    g.beginPath();
+    g.moveTo(cx + bw * 0.4, top + 5);
+    g.quadraticCurveTo(cx + bw * 0.4 + 4, top + 11, cx + bw * 0.4, top + 13);
+    g.quadraticCurveTo(cx + bw * 0.4 - 4, top + 11, cx + bw * 0.4, top + 5);
+    g.fill();
+  } else if (expr === 'dizzy') { // wobbly mouth
+    g.moveTo(cx - 1, top + 24);
+    g.quadraticCurveTo(cx + 1.5, top + 21, cx + 4, top + 24);
+    g.quadraticCurveTo(cx + 6.5, top + 27, cx + 9, top + 24);
+    g.stroke();
+  } else {
+    g.arc(cx + 4, top + 22, 4.5, 0.2, Math.PI - 0.6);
+    g.stroke();
+  }
+}
+
+export function playerTexture(scene: Phaser.Scene, color: number, expr: Face = 'normal'): string {
   const W = PLAYER_TEX_W;
   const H = PLAYER_TEX_H;
-  return canvas(scene, `player_${color}`, W, H, (g) => {
+  return canvas(scene, expr === 'normal' ? `player_${color}` : `player_${color}_${expr}`, W, H, (g) => {
     const cx = W / 2;
     const bw = PLAYER_W;
     const top = H - PLAYER_H + 8;
@@ -113,29 +188,7 @@ export function playerTexture(scene: Phaser.Scene, color: number): string {
     g.beginPath();
     g.ellipse(cx + 2, H - 17, bw * 0.28, 9, 0, 0, Math.PI * 2);
     g.fill();
-    // eyes (looking right)
-    for (const dx of [-0.16, 0.2]) {
-      const ex = cx + dx * bw + 2;
-      const ey = top + 14;
-      g.fillStyle = '#fff';
-      g.beginPath();
-      g.ellipse(ex, ey, 5.2, 6.4, 0, 0, Math.PI * 2);
-      g.fill();
-      g.fillStyle = '#1b1030';
-      g.beginPath();
-      g.arc(ex + 2, ey + 1, 2.8, 0, Math.PI * 2);
-      g.fill();
-      g.fillStyle = '#fff';
-      g.beginPath();
-      g.arc(ex + 2.8, ey - 0.4, 1, 0, Math.PI * 2);
-      g.fill();
-    }
-    // smile
-    g.strokeStyle = '#1b1030';
-    g.lineWidth = 1.8;
-    g.beginPath();
-    g.arc(cx + 4, top + 22, 4.5, 0.2, Math.PI - 0.6);
-    g.stroke();
+    face(g, expr, cx, top, bw);
   });
 }
 
