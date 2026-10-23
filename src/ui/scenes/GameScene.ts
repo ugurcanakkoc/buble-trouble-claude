@@ -8,6 +8,7 @@ import { sfx } from '../audio';
 import { cssColor, h, toast } from '../dom';
 import { showEndCard } from '../endcard';
 import { mountNetMeter } from '../netmeter';
+import { setExitHandler } from '../settings';
 import { Smoother } from '../render/smooth';
 import { Hud } from '../hud';
 import { createControls } from '../input';
@@ -91,7 +92,9 @@ export class GameScene extends Phaser.Scene {
     this.loop.start(payload);
     mountNetMeter(this, this.loop, session);
 
+    setExitHandler(() => this.toMenu(), session.isHost);
     this.events.once('shutdown', () => {
+      setExitHandler(null);
       this.loop.dispose();
       this.controls.destroy();
       this.endCard?.();

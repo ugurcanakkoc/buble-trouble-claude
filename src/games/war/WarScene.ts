@@ -6,6 +6,7 @@ import { cssColor, h, toast } from '../../ui/dom';
 import { showEndCard } from '../../ui/endcard';
 import { GameLoop, startPayload } from '../../ui/loop';
 import { mountNetMeter } from '../../ui/netmeter';
+import { setExitHandler } from '../../ui/settings';
 import { FONT, sparkTexture } from '../../ui/textures';
 import * as B from './balance';
 import {
@@ -142,7 +143,9 @@ export class WarScene extends Phaser.Scene {
     mountNetMeter(this, this.loop, session).setPosition(8, 66); // below the HP bars + minimap
     this.resetForMatch();
 
+    setExitHandler(() => this.toMenu(), session.isHost);
     this.events.once('shutdown', () => {
+      setExitHandler(null);
       this.loop.dispose();
       this.closeEnd?.();
     });

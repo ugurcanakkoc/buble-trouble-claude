@@ -6,6 +6,7 @@ import { cssColor, h, isTouch, toast } from '../../ui/dom';
 import { showEndCard } from '../../ui/endcard';
 import { GameLoop, startPayload } from '../../ui/loop';
 import { mountNetMeter } from '../../ui/netmeter';
+import { setExitHandler } from '../../ui/settings';
 import { Pool } from '../../ui/render/pool';
 import { Smoother } from '../../ui/render/smooth';
 import { FONT, RES } from '../../ui/textures';
@@ -57,7 +58,7 @@ function createControls() {
   window.addEventListener('keyup', onUp);
   window.addEventListener('blur', clear);
   const touch: TouchControls | null = isTouch()
-    ? mountTouchControls({ left: { dpad: true }, right: [{ id: 'bomb', label: 'BOMBA', size: 'big' }] })
+    ? mountTouchControls({ left: { joystick: true }, right: [{ id: 'bomb', label: 'BOMBA', size: 'big' }] })
     : null;
   touch?.onPress('bomb', () => seq++);
   return {
@@ -249,7 +250,9 @@ export class BombScene extends Phaser.Scene {
     this.loop.start(payload);
     mountNetMeter(this, this.loop, session);
 
+    setExitHandler(() => this.toMenu(), session.isHost);
     this.events.once('shutdown', () => {
+      setExitHandler(null);
       this.loop.dispose();
       this.controls.destroy();
       this.closeEnd?.();

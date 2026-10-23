@@ -1,3 +1,4 @@
+import { setExitHandler } from '../settings';
 import Phaser from 'phaser';
 import type { LobbyPlayer, RoomSession } from '../../net';
 import { getGame } from '../../games/registry';
@@ -105,7 +106,9 @@ export class LobbyScene extends Phaser.Scene {
         ),
       ),
     );
+    setExitHandler(() => leave.click(), session.isHost); // disabled after first click, so no double leave
     this.events.once('shutdown', () => {
+      setExitHandler(null);
       offs.forEach((off) => off());
       unmount();
     });

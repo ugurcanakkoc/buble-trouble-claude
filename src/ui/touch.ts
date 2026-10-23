@@ -3,6 +3,7 @@
 // Callers decide whether to mount (see dom.isTouch()).
 import { h } from './dom';
 import { controlsSwapped } from './settings';
+import { clampVec, joyDir, type JoyDir } from './joystick';
 
 export interface TouchButtonSpec {
   id: string;
@@ -10,8 +11,11 @@ export interface TouchButtonSpec {
   size?: 'normal' | 'big' | 'small'; // normal: tall pill, big: Ø100 (pink, e.g. ATEŞ/BOMBA), small: 52px
   shape?: 'pill' | 'circle' | 'square'; // default: normal→pill, big→circle, small→square
 }
-/** A list of buttons (≤3 in a row, more → 2-column grid), or a 4-way d-pad: ids up/down/left/right. */
-export type TouchGroup = TouchButtonSpec[] | { dpad: true };
+/**
+ * A list of buttons (≤3 in a row, more → 2-column grid), a 4-way d-pad, or a floating joystick (whole side
+ * zone, dominant axis only). D-pad and joystick both report ids up/down/left/right.
+ */
+export type TouchGroup = TouchButtonSpec[] | { dpad: true } | { joystick: true };
 
 export interface TouchControls {
   isDown(id: string): boolean;
@@ -25,6 +29,7 @@ export interface TouchControls {
 /** A tap shorter than this still reads as held for this long, so the sim (60 Hz) always sees it. */
 const TAP_MS = 50;
 const DPAD: [string, string, string][] = [['up', '▲', 'u'], ['left', '◀', 'l'], ['right', '▶', 'r'], ['down', '▼', 'd']];
+const JOY_DIRS: JoyDir[] = ['up', 'down', 'left', 'right'];
 const DEFAULT_SHAPE = { normal: 'pill', big: 'circle', small: 'square' } as const;
 
 export function mountTouchControls(spec: { left: TouchGroup; right: TouchGroup }): TouchControls {
@@ -60,7 +65,74 @@ export function mountTouchControls(spec: { left: TouchGroup; right: TouchGroup }
   };
   const sync = (st: { el: HTMLElement; active: Set<number> }) => st.el.classList.toggle('on', st.active.size > 0);
 
+  const onRelease: ((e: Event) => void)[] = [];
+
+  // Floating joystick: the base appears where the thumb lands; tracks only its own pointerId.
+  const joystick = () => {
+    const knob = h('div', { class: 'jknob' });
+    const base = h('div', { class: 'jbase idle' }, knob);
+    const zone = h('div', { class: 'tgroup joy' }, base);
+    const dirs = new Map(
+      JOY_DIRS.map((d) => {
+        const st = { el: h('i'), active: new Set<number>(), press: new Set<() => void>(), enabled: true, tappedAt: -1e9 };
+        buttons.set(d, st);
+        return [d, st] as const;
+      }),
+    );
+    let pid: number | null = null;
+    let cx = 0;
+    let cy = 0;
+    let dir: JoyDir | null = null;
+    const set = (d: JoyDir | null) => {
+      if (d === dir) return;
+      if (dir) dirs.get(dir)!.active.clear();
+      dir = d;
+      const st = d && dirs.get(d)!;
+      if (!st || !st.enabled || pid === null) return;
+      st.active.add(pid);
+      st.tappedAt = performance.now();
+      st.press.forEach((cb) => cb());
+    };
+    const reset = () => {
+      set(null);
+      pid = null;
+      base.classList.add('idle');
+      base.style.left = base.style.top = knob.style.transform = '';
+    };
+    const move = (e: PointerEvent) => {
+      if (e.pointerId !== pid) return;
+      const r = base.offsetWidth / 2 || 65;
+      const [kx, ky] = clampVec(e.clientX - cx, e.clientY - cy, r);
+      knob.style.transform = `translate(${kx}px, ${ky}px)`;
+      set(joyDir(e.clientX - cx, e.clientY - cy, r, dir));
+    };
+    zone.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (pid !== null) return;
+      pid = e.pointerId;
+      try {
+        zone.setPointerCapture?.(pid); // keep tracking when the thumb slides out of the zone
+      } catch {
+        /* pointer already gone */
+      }
+      const z = zone.getBoundingClientRect();
+      cx = e.clientX;
+      cy = e.clientY;
+      base.classList.remove('idle');
+      base.style.left = `${cx - z.left}px`;
+      base.style.top = `${cy - z.top}px`;
+      move(e);
+    });
+    zone.addEventListener('pointermove', move);
+    zone.addEventListener('contextmenu', (e) => e.preventDefault());
+    onRelease.push((e) => {
+      if (!(e instanceof PointerEvent) || e.pointerId === pid) reset();
+    });
+    return zone;
+  };
+
   const group = (g: TouchGroup) => {
+    if ('joystick' in g) return joystick();
     if (!Array.isArray(g)) return h('div', { class: 'tgroup dpad' }, ...DPAD.map(([id, label, cls]) => btn({ id, label, size: 'small' }, cls)));
     return h('div', { class: `tgroup${g.length > 3 ? ' grid' : ''}` }, ...g.map((b) => btn(b)));
   };
@@ -70,6 +142,7 @@ export function mountTouchControls(spec: { left: TouchGroup; right: TouchGroup }
 
   // Safety net: a release anywhere (or losing focus) always lets go, so a held button can never stick.
   const release = (e: Event) => {
+    onRelease.forEach((f) => f(e));
     for (const st of buttons.values()) {
       if (e instanceof PointerEvent) st.active.delete(e.pointerId);
       else st.active.clear();

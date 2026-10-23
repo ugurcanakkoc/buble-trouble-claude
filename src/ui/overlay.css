@@ -147,6 +147,24 @@ canvas { display: block; }
 .touch .dpad .tbtn { width: var(--cell); height: var(--cell); font-size: calc(var(--cell) * .38); }
 .touch .dpad .u { grid-area: 1 / 2; } .touch .dpad .l { grid-area: 2 / 1; }
 .touch .dpad .r { grid-area: 2 / 3; } .touch .dpad .d { grid-area: 3 / 2; }
+/* floating joystick: the whole side zone (below the ⚙/🔊 row) catches the thumb; base appears where it lands */
+.touch .tgroup.joy {
+  --jb: clamp(120px, 36vh, 150px);
+  pointer-events: auto; top: 80px; bottom: 0; width: 45%; touch-action: none; -webkit-tap-highlight-color: transparent;
+}
+.touch .tgroup.joy.side-l { left: 0; } .touch .tgroup.joy.side-r { right: 0; }
+.touch .jbase {
+  position: absolute; width: var(--jb); height: var(--jb); margin: calc(var(--jb) / -2) 0 0 calc(var(--jb) / -2);
+  border-radius: 50%; background: rgba(255, 255, 255, .1); border: 3px solid rgba(255, 255, 255, .35); box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center; pointer-events: none;
+}
+.touch .jknob {
+  width: 44%; height: 44%; border-radius: 50%; background: rgba(255, 255, 255, .4);
+  border: 3px solid rgba(255, 255, 255, .6); box-sizing: border-box; box-shadow: 0 2px 8px rgba(0, 0, 0, .4);
+}
+.touch .jbase.idle { opacity: .45; top: auto; bottom: calc(18px + env(safe-area-inset-bottom)); margin: 0; }
+.touch .joy.side-l .jbase.idle { left: calc(18px + env(safe-area-inset-left)); }
+.touch .joy.side-r .jbase.idle { right: calc(18px + env(safe-area-inset-right)); }
 .touch .tbtn {
   pointer-events: auto; width: clamp(74px, 21vh, 104px); height: clamp(84px, 25vh, 122px); border-radius: 30px;
   background: rgba(255, 255, 255, .1); border: 3px solid rgba(255, 255, 255, .35); box-sizing: border-box;
