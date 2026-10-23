@@ -200,7 +200,7 @@ export class BombScene extends Phaser.Scene {
       onSnapshot: (prev, next) => this.diffSnapshot(prev, next),
     });
     this.loop.start(payload);
-    mountNetMeter(this, this.loop, session.isHost);
+    mountNetMeter(this, this.loop, session);
 
     this.events.once('shutdown', () => {
       this.loop.dispose();
