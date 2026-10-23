@@ -1,16 +1,21 @@
 import Phaser from 'phaser';
 import { roomApi, type JoinError } from '../../net';
+import { GAMES, getGame, isPlayable } from '../../games/registry';
+import type { GameDef, GameId } from '../../games/types';
 import { h, load, mount, save } from '../dom';
 import { createBoardPanel } from '../leaderboard';
 import { addBackdrop } from './backdrop';
 
 const JOIN_ERRORS: Record<JoinError, string> = {
   ROOM_NOT_FOUND: 'Oda bulunamadı',
-  ROOM_FULL: 'Oda dolu (en fazla 4 kişi)',
+  ROOM_FULL: 'Oda dolu',
   GAME_STARTED: 'Oyun başlamış',
   NETWORK: 'Bağlantı hatası',
 };
 const NAME_KEY = 'bubble.username';
+const GAME_KEY = 'platform.game';
+
+const range = (g: GameDef) => (g.minPlayers === g.maxPlayers ? `${g.maxPlayers}` : `${g.minPlayers}–${g.maxPlayers}`) + ' oyuncu';
 
 export class MenuScene extends Phaser.Scene {
   constructor() {
@@ -29,8 +34,30 @@ export class MenuScene extends Phaser.Scene {
       enterKeyHint: 'go', spellcheck: false,
     });
     const error = h('div', { class: 'error', role: 'alert' });
-    const create = h('button', { class: 'btn pink big', text: 'Oda Kur' });
+    const create = h('button', { class: 'btn pink big' });
     const join = h('button', { class: 'btn cyan', text: 'Odaya Katıl' });
+
+    // game picker
+    const saved = load(GAME_KEY) as GameId | null;
+    let picked: GameId = saved && isPlayable(saved) ? saved : 'bubble';
+    const cards = GAMES.map((g) => {
+      const soon = !isPlayable(g.id);
+      const el = h('button', { class: `gcard${soon ? ' soon' : ''}`, disabled: soon, 'aria-label': g.title },
+        h('span', { class: 'icon', text: g.icon }),
+        h('b', { text: g.title }),
+        h('small', { text: g.tagline }),
+        h('span', { class: 'range', text: soon ? 'yakında' : range(g) }),
+      );
+      el.onclick = () => pick(g.id);
+      return { id: g.id, el };
+    });
+    const pick = (id: GameId) => {
+      picked = id;
+      save(GAME_KEY, id);
+      for (const c of cards) c.el.classList.toggle('on', c.id === id);
+      create.textContent = `Oda Kur · ${getGame(id).title}`;
+    };
+    pick(picked);
 
     const busy = (on: boolean) => [create, join, name, code].forEach((el) => (el.disabled = on));
     const validName = () => {
@@ -49,13 +76,14 @@ export class MenuScene extends Phaser.Scene {
       if (!n) return;
       busy(true);
       error.textContent = '';
+      const label = create.textContent;
       create.textContent = 'Bağlanıyor…';
       try {
-        const session = await roomApi.createRoom(n);
+        const session = await roomApi.createRoom(n, picked, getGame(picked).maxPlayers);
         this.scene.start('Lobby', { session });
       } catch {
         error.textContent = JOIN_ERRORS.NETWORK;
-        create.textContent = 'Oda Kur';
+        create.textContent = label;
         busy(false);
       }
     };
@@ -73,11 +101,12 @@ export class MenuScene extends Phaser.Scene {
       error.textContent = '';
       join.textContent = 'Katılıyor…';
       try {
-        const session = await roomApi.joinRoom(c, n);
+        const session = await roomApi.joinRoom(c, n); // game comes from the host
         this.scene.start('Lobby', { session });
       } catch (e) {
-        const msg = (e as Error)?.message as JoinError;
-        error.textContent = JOIN_ERRORS[msg] ?? JOIN_ERRORS.NETWORK;
+        const err = e as Error & { max?: number };
+        const msg = JOIN_ERRORS[err?.message as JoinError] ?? JOIN_ERRORS.NETWORK;
+        error.textContent = err?.message === 'ROOM_FULL' ? `${msg} (en fazla ${err.max ?? 4} kişi)` : msg;
         join.textContent = 'Odaya Katıl';
         busy(false);
       }
@@ -88,21 +117,26 @@ export class MenuScene extends Phaser.Scene {
     name.addEventListener('keydown', (e) => e.key === 'Enter' && create.click());
 
     const board = createBoardPanel();
-    const best = h('button', { class: 'btn ghost', text: '🏆 En İyiler', onclick: () => board.open() });
+    const best = h('button', { class: 'btn ghost', text: '🏆 Balon Avı rekorları', onclick: () => board.open() });
 
     const unmountBoard = mount(board.el);
     const unmount = mount(
       h('div', { class: 'screen' },
-        h('div', { class: 'card' },
-          h('h1', { class: 'title', text: 'Bubble Online' }),
-          h('p', { class: 'subtitle', text: 'Arkadaşlarınla balonları patlat!' }),
-          h('div', { class: 'label', text: 'Kullanıcı adı' }),
-          name,
-          create,
-          h('div', { class: 'divider', text: 'ya da' }),
-          h('div', { class: 'row' }, code, join),
-          error,
-          best,
+        h('div', { class: 'card wide menu' },
+          h('div', { class: 'col' },
+            h('h1', { class: 'title', text: 'Oyun Gecesi' }),
+            h('p', { class: 'subtitle', text: 'Bir oyun seç, oda kur, arkadaşlarını çağır!' }),
+            h('div', { class: 'label', text: 'Kullanıcı adı' }),
+            name,
+            h('div', { class: 'games' }, ...cards.map((c) => c.el)),
+            create,
+          ),
+          h('div', { class: 'col side' },
+            h('div', { class: 'divider', text: 'ya da koda katıl' }),
+            h('div', { class: 'row' }, code, join),
+            error,
+            best,
+          ),
         ),
       ),
     );

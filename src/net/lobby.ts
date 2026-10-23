@@ -1,5 +1,5 @@
 // Pure helpers (no network) so they can be unit-tested.
-import { MAX_PLAYERS } from '../sim/types';
+import type { GameId } from '../games/types';
 import type { JoinError, LobbyPlayer } from './types';
 
 export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -14,7 +14,11 @@ export interface PresenceMeta {
   isHost: boolean;
   inGame: boolean;
   online_at: number;
+  game: GameId; // host's game (joiners copy it)
+  max: number; // host's game maxPlayers
 }
+
+export const DEFAULT_MAX = 4;
 
 export function generateCode(rand: () => number = Math.random): string {
   let s = '';
@@ -42,6 +46,8 @@ export function parsePresence(state: Record<string, Array<Partial<PresenceMeta>>
       isHost: !!m.isHost,
       inGame: !!m.inGame,
       online_at: m.online_at ?? 0,
+      game: m.game ?? 'bubble',
+      max: m.max ?? DEFAULT_MAX,
     });
   }
   // host first, then by join time (id as stable tiebreak)
@@ -54,7 +60,7 @@ export const toLobby = (metas: PresenceMeta[]): LobbyPlayer[] =>
 export function joinError(metas: PresenceMeta[]): JoinError | null {
   const host = metas.find((m) => m.isHost);
   if (!host) return 'ROOM_NOT_FOUND';
-  if (metas.length >= MAX_PLAYERS) return 'ROOM_FULL';
+  if (metas.length >= host.max) return 'ROOM_FULL';
   if (host.inGame) return 'GAME_STARTED';
   return null;
 }

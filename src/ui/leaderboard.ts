@@ -39,7 +39,7 @@ export function createBoardPanel(): { open(): void; el: HTMLElement } {
   const slot = h('div');
   const el = h('div', { class: 'screen board', hidden: true },
     h('div', { class: 'card' },
-      h('h2', { class: 'title small', text: 'En İyiler' }),
+      h('h2', { class: 'title small', text: 'Balon Avı rekorları' }),
       slot,
       h('button', { class: 'btn ghost', text: 'Kapat', onclick: () => (el.hidden = true) }),
     ),

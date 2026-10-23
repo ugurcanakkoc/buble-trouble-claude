@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
-import type { GameMode } from '../../sim';
 import type { LobbyPlayer, RoomSession } from '../../net';
+import { getGame } from '../../games/registry';
+import type { ModeDef } from '../../games/types';
 import { cssColor, h, mount, toast } from '../dom';
 import { startPayload } from '../loop';
 import { addBackdrop } from './backdrop';
@@ -12,25 +13,23 @@ export class LobbyScene extends Phaser.Scene {
 
   create({ session }: { session: RoomSession }): void {
     addBackdrop(this, 2);
+    const game = getGame(session.game);
 
     const list = h('ul', { class: 'players' });
+    const count = h('span', { class: 'count' });
     const start = h('button', { class: 'btn green big', text: 'Başlat' });
     const copy = h('button', { class: 'btn ghost', text: 'Kopyala' });
     const leave = h('button', { class: 'btn ghost', text: 'Ayrıl' });
 
-    // host-only mode picker
-    let mode: GameMode = 'classic';
-    const cards: Record<GameMode, HTMLButtonElement> = {
-      classic: modeCard('🎈', 'Klasik', 'Sonsuz seviye'),
-      god: modeCard('☁️', 'Tanrı', 'Biri top yağdırır, sırayla herkes tanrı olur'),
-      rain: modeCard('🌧️', 'Yağmur', 'Herkes aynı takım, toplar yukarıdan yağar'),
+    // host-only mode picker (modes from the GameDef, gated by minPlayers)
+    let mode = game.modes[0].id;
+    const cards = game.modes.map((m) => ({ m, el: modeCard(m) }));
+    const pick = (id: string) => {
+      mode = id;
+      for (const c of cards) c.el.classList.toggle('on', c.m.id === id);
     };
-    const pick = (m: GameMode) => {
-      mode = m;
-      for (const [k, el] of Object.entries(cards)) el.classList.toggle('on', k === m);
-    };
-    for (const [k, el] of Object.entries(cards)) el.onclick = () => !el.disabled && pick(k as GameMode);
-    pick('classic');
+    for (const c of cards) c.el.onclick = () => !c.el.disabled && pick(c.m.id);
+    pick(mode);
 
     const render = (players: LobbyPlayer[]) => {
       list.replaceChildren(
@@ -43,11 +42,15 @@ export class LobbyScene extends Phaser.Scene {
           ),
         ),
       );
-      const solo = players.length < 2;
-      cards.god.disabled = solo;
-      cards.god.querySelector('small')!.textContent = solo ? 'En az 2 kişi' : 'Biri top yağdırır, sırayla herkes tanrı olur';
-      if (solo && mode === 'god') pick('classic');
-      start.disabled = players.length < 1;
+      count.textContent = `${players.length}/${game.maxPlayers}`;
+      for (const { m, el } of cards) {
+        const short = players.length < m.minPlayers;
+        el.disabled = short;
+        el.querySelector('small')!.textContent = short ? `En az ${m.minPlayers} kişi` : m.desc;
+      }
+      const current = cards.find((c) => c.m.id === mode)!;
+      if (current.el.disabled) pick(cards.find((c) => !c.el.disabled)?.m.id ?? mode);
+      start.disabled = players.length < game.minPlayers || cards.every((c) => c.el.disabled);
     };
     render(session.players());
 
@@ -62,7 +65,7 @@ export class LobbyScene extends Phaser.Scene {
     };
     start.onclick = () => {
       start.disabled = true;
-      session.startGame(startPayload(session, 0, mode));
+      session.startGame(startPayload(session, mode));
     };
     leave.onclick = async () => {
       leave.disabled = true;
@@ -72,7 +75,7 @@ export class LobbyScene extends Phaser.Scene {
 
     const offs = [
       session.onPlayersChange(render),
-      session.onStart((payload) => this.scene.start('Game', { session, payload })),
+      session.onStart((payload) => this.scene.start(getGame(payload.game ?? session.game).sceneKey, { session, payload })),
     ];
     if (!session.isHost) {
       offs.push(
@@ -88,14 +91,16 @@ export class LobbyScene extends Phaser.Scene {
       h('div', { class: 'screen' },
         h('div', { class: 'card wide lobby' },
           h('div', { class: 'col' },
+            h('div', { class: 'game-head' }, h('span', { text: game.icon }), h('b', { text: game.title })),
             h('div', { class: 'hint', text: 'Oda kodu' }),
             h('div', { class: 'code-big', text: session.code }),
             copy,
+            h('div', { class: 'hint players-head' }, h('span', { text: 'Oyuncular' }), count),
             list,
           ),
           h('div', { class: 'col' },
             session.isHost
-              ? h('div', { class: 'modes' }, cards.classic, cards.god, cards.rain)
+              ? h('div', { class: 'modes', style: `grid-template-columns:repeat(${Math.min(cards.length, 3)},1fr)` }, ...cards.map((c) => c.el))
               : h('div', { class: 'hint', text: 'Mod kurucu tarafından seçilir' }),
             session.isHost ? start : h('div', { class: 'hint', text: 'Kurucunun başlatması bekleniyor…' }),
             leave,
@@ -110,6 +115,10 @@ export class LobbyScene extends Phaser.Scene {
   }
 }
 
-function modeCard(icon: string, title: string, desc: string): HTMLButtonElement {
-  return h('button', { class: 'mode' }, h('span', { class: 'icon', text: icon }), h('b', { text: title }), h('small', { text: desc }));
+function modeCard(m: ModeDef): HTMLButtonElement {
+  return h('button', { class: 'mode' },
+    h('span', { class: 'icon', text: m.icon ?? '🎮' }),
+    h('b', { text: m.label }),
+    h('small', { text: m.desc }),
+  );
 }

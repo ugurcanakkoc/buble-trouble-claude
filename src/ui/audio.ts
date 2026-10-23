@@ -24,15 +24,31 @@ function ac(): AudioContext | null {
 const unlock = () => void ac()?.resume();
 for (const ev of ['pointerdown', 'keydown', 'touchend']) window.addEventListener(ev, unlock, { capture: true });
 
-function tone(type: OscillatorType, f0: number, f1: number, dur: number, vol = 0.3, delay = 0) {
+export interface ToneSpec {
+  freq: number; // Hz
+  dur: number; // seconds
+  type?: OscillatorType; // default 'sine'
+  vol?: number; // 0..1, default 0.3
+  slideTo?: number; // end frequency (exponential slide), default = freq
+  delay?: number; // seconds from now
+}
+export interface NoiseSpec {
+  dur: number;
+  vol?: number; // default 0.4
+  filter?: number; // bandpass center Hz, default 1000
+  delay?: number;
+}
+
+/** Synth one oscillator blip (no-op while muted or before the first user gesture). */
+export function playTone({ freq, dur, type = 'sine', vol = 0.3, slideTo = freq, delay = 0 }: ToneSpec): void {
   const c = ac();
   if (!c || !master || muted || c.state !== 'running') return;
   const t = c.currentTime + delay;
   const o = c.createOscillator();
   const g = c.createGain();
   o.type = type;
-  o.frequency.setValueAtTime(f0, t);
-  o.frequency.exponentialRampToValueAtTime(Math.max(f1, 1), t + dur);
+  o.frequency.setValueAtTime(freq, t);
+  o.frequency.exponentialRampToValueAtTime(Math.max(slideTo, 1), t + dur);
   g.gain.setValueAtTime(vol, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + dur);
   o.connect(g).connect(master);
@@ -40,7 +56,8 @@ function tone(type: OscillatorType, f0: number, f1: number, dur: number, vol = 0
   o.stop(t + dur + 0.02);
 }
 
-function noise(dur: number, vol: number, freq: number) {
+/** Fading white-noise burst through a bandpass (explosions, pops, hits). */
+export function playNoise({ dur, vol = 0.4, filter = 1000, delay = 0 }: NoiseSpec): void {
   const c = ac();
   if (!c || !master || muted || c.state !== 'running') return;
   const buf = c.createBuffer(1, Math.ceil(c.sampleRate * dur), c.sampleRate);
@@ -50,13 +67,18 @@ function noise(dur: number, vol: number, freq: number) {
   src.buffer = buf;
   const f = c.createBiquadFilter();
   f.type = 'bandpass';
-  f.frequency.value = freq;
+  f.frequency.value = filter;
   const g = c.createGain();
   g.gain.value = vol;
   src.connect(f).connect(g).connect(master);
-  src.start();
+  src.start(c.currentTime + delay);
 }
 
+const tone = (type: OscillatorType, freq: number, slideTo: number, dur: number, vol = 0.3, delay = 0) =>
+  playTone({ type, freq, slideTo, dur, vol, delay });
+const noise = (dur: number, vol: number, filter: number) => playNoise({ dur, vol, filter });
+
+// Balon Avı sounds
 export const sfx = {
   shoot: () => tone('square', 880, 1760, 0.09, 0.12),
   gun: () => tone('square', 1400, 700, 0.05, 0.08),

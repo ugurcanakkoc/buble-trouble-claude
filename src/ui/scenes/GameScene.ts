@@ -1,8 +1,12 @@
 import Phaser from 'phaser';
-import { PLAYER_H, WORLD_H, WORLD_W, createGame, getLevel, step, type Ball, type GameState, type Phase, type SimEvent } from '../../sim';
+import { PLAYER_H, WORLD_H, WORLD_W, getLevel, type Ball, type GameState, type InputState, type Phase, type SimEvent } from '../../sim';
+import { bubbleLoopOptions, bubbleSim } from '../../games/bubble/sim';
 import { submitScore, type RoomSession, type StartPayload } from '../../net';
 import { sfx } from '../audio';
-import { cssColor, h, mount, toast } from '../dom';
+import { cssColor, h, toast } from '../dom';
+import { showEndCard } from '../endcard';
+import { mountNetMeter } from '../netmeter';
+import { Smoother } from '../render/smooth';
 import { Hud } from '../hud';
 import { createControls } from '../input';
 import { loadScores } from '../leaderboard';
@@ -13,12 +17,12 @@ import { Fx } from '../render/fx';
 import { ProjectileRenderer } from '../render/projectiles';
 import { GodRenderer } from '../render/god';
 import { FONT, RES, bgTexture } from '../textures';
-import { statsVisible } from '../settings';
 import { clock } from '../hud';
 
 export class GameScene extends Phaser.Scene {
   private session!: RoomSession;
-  private loop!: GameLoop;
+  private loop!: GameLoop<GameState, InputState, SimEvent>;
+  private smooth = new Smoother();
   private controls!: ReturnType<typeof createControls>;
   private bg!: Phaser.GameObjects.Image;
   private blocks!: BlockRenderer;
@@ -35,9 +39,6 @@ export class GameScene extends Phaser.Scene {
   private lastBalls: Ball[] = [];
   private lifeLost: 'hit' | 'timeout' = 'hit';
   private endCard: (() => void) | null = null;
-  private statsText!: Phaser.GameObjects.Text;
-  private fps = 60;
-  private statsAt = 0;
 
   constructor() {
     super('Game');
@@ -50,7 +51,7 @@ export class GameScene extends Phaser.Scene {
     this.lastBalls = [];
     this.endCard = null;
 
-    this.bg = this.add.image(0, 0, bgTexture(this, payload.levelIndex)).setOrigin(0).setScale(1 / RES).setDepth(0);
+    this.bg = this.add.image(0, 0, bgTexture(this, payload.levelIndex ?? 0)).setOrigin(0).setScale(1 / RES).setDepth(0);
     this.blocks = new BlockRenderer(this);
     this.shots = new ProjectileRenderer(this);
     this.entities = new EntityRenderer(this);
@@ -64,17 +65,17 @@ export class GameScene extends Phaser.Scene {
     this.banner = this.add.text(WORLD_W / 2, WORLD_H / 2 - 20, '', style(64, '#ffd23f')).setOrigin(0.5).setDepth(20);
     this.bannerSub = this.add.text(WORLD_W / 2, WORLD_H / 2 + 36, '', style(28, '#f4f1ff')).setOrigin(0.5).setDepth(20);
 
-    this.statsText = this.add
-      .text(8, 6, '', { fontFamily: FONT, fontSize: '18px', color: '#c9c8f0', stroke: '#0d1020', strokeThickness: 4, resolution: 2 })
-      .setAlpha(0.85)
-      .setDepth(30);
-
     this.controls = createControls();
-    this.loop = new GameLoop(session, { createGame, step }, () => {
-      toast('Oda kurucusu ayrıldı');
-      this.toMenu();
+    this.smooth.clear();
+    this.loop = new GameLoop(session, bubbleSim, {
+      ...bubbleLoopOptions(session.self.id, this.smooth),
+      onHostLeft: () => {
+        toast('Oda kurucusu ayrıldı');
+        this.toMenu();
+      },
     });
     this.loop.start(payload);
+    mountNetMeter(this, this.loop, session);
 
     this.events.once('shutdown', () => {
       this.loop.dispose();
@@ -96,26 +97,12 @@ export class GameScene extends Phaser.Scene {
     this.handleEvents(events, s);
     this.blocks.update(s.blocks);
     this.shots.update(s.projectiles, s.tick);
-    this.loop.smooth.decay(Math.min(delta, 250));
-    this.entities.update(s, time, this.loop.smooth, this.session.self.id);
-    this.godView.update(s, time, this.loop.smooth);
+    this.smooth.decay(Math.min(delta, 250));
+    this.entities.update(s, time, this.smooth, this.session.self.id);
+    this.godView.update(s, time, this.smooth);
     this.hud.update(s, this.session.self.id);
     this.phaseOverlay(s);
-    this.updateStats(time, delta);
     this.lastBalls = s.balls.map((b) => ({ ...b }));
-  }
-
-  /** "60 FPS · güncelleme 135ms (max 410)": smoothed FPS + snapshot gaps on clients. */
-  private updateStats(time: number, delta: number): void {
-    if (delta > 0) this.fps += (1000 / delta - this.fps) * 0.05;
-    const show = statsVisible();
-    this.statsText.setVisible(show);
-    if (!show || time - this.statsAt < 500) return;
-    this.statsAt = time;
-    const net = this.session.isHost ? null : this.loop.snapshotStats();
-    this.statsText.setText(
-      `${Math.round(this.fps)} FPS` + (net ? ` · güncelleme ${Math.round(net.avg)}ms (max ${Math.round(net.max)})` : ''),
-    );
   }
 
   private handleEvents(events: SimEvent[], s: GameState): void {
@@ -233,13 +220,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   private showEnd(s: GameState): void {
-    const again = h('button', { class: 'btn green big', text: 'Tekrar Oyna' });
-    again.onclick = () => {
-      again.disabled = true;
-      this.session.startGame(startPayload(this.session, 0, s.mode)); // loop picks it up via onStart
-    };
-    const menu = h('button', { class: 'btn ghost', text: 'Menü' });
-    menu.onclick = () => this.toMenu();
     let title = 'Oyun Bitti';
     let body: HTMLElement;
     if (s.mode === 'god' && s.god) {
@@ -273,16 +253,15 @@ export class GameScene extends Phaser.Scene {
         top,
       );
     }
-    this.endCard = mount(
-      h('div', { class: 'screen endcard' },
-        h('div', { class: 'card' },
-          h('h1', { class: 'title', text: title }),
-          body,
-          this.session.isHost ? again : h('div', { class: 'hint', text: 'Kurucu yeni oyunu başlatabilir…' }),
-          menu,
-        ),
-      ),
-    );
+    this.endCard = showEndCard({
+      title,
+      lines: [],
+      body,
+      isHost: this.session.isHost,
+      // loop picks the restart up via onStart
+      onRestart: () => this.session.startGame(startPayload(this.session, s.mode, 0)),
+      onMenu: () => this.toMenu(),
+    });
   }
 
   private toMenu(): void {

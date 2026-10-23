@@ -1,79 +1,62 @@
 import { describe, expect, it, vi } from 'vitest';
-import { EMPTY_INPUT, type GameState, type InputState, type PlayerId, type PlayerInfo } from '../sim';
-import type { LobbyPlayer, RoomSession, StartPayload } from '../net';
-import { GameLoop, STEP_MS, type SimFns } from './loop';
+import type { GameSim } from '../games/types';
+import type { PlayerId, PlayerInfo } from '../sim';
+import type { StartPayload } from '../net';
+import { GameLoop, SNAPSHOT_LEAD_TICKS, STEP_MS, startPayload } from './loop';
+import { fakeSession } from './testSession';
 
-const IDLE: InputState = { ...EMPTY_INPUT };
-
-function fakeSession(isHost: boolean, selfId = isHost ? 'h' : 'c') {
-  const cbs: Record<string, ((...a: any[]) => void)[]> = {};
-  const on = (k: string) => (cb: (...a: any[]) => void) => {
-    (cbs[k] ??= []).push(cb);
-    return () => (cbs[k] = cbs[k].filter((f) => f !== cb));
-  };
-  const self: LobbyPlayer = { id: selfId, name: selfId, color: 0xff0000, isHost };
-  const s = {
-    code: 'ABCD',
-    self,
-    isHost,
-    players: () => [self],
-    onPlayersChange: on('players'),
-    startGame: vi.fn(),
-    sendSnapshot: vi.fn(),
-    onInput: on('input'),
-    onStart: on('start'),
-    sendInput: vi.fn(),
-    onSnapshot: on('snapshot'),
-    onHostLeft: on('hostLeft'),
-    leave: vi.fn(async () => {}),
-  } satisfies RoomSession;
-  const emit = (k: string, ...a: any[]) => cbs[k]?.forEach((f) => f(...a));
-  return { s, emit };
-}
-
-function mkState(players: PlayerInfo[]): GameState {
-  return {
-    tick: 0, rng: 1, levelIndex: 0, phase: 'playing', phaseUntil: 0, timeLeftTicks: 6000, lives: 5,
-    freezeUntil: 0, nextId: 10, balls: [], projectiles: [], powerUps: [], blocks: [], mode: 'classic', god: null,
-    players: players.map((p, i) => ({
-      ...p, x: 100 + i * 100, y: 480, facing: 1, weapon: 'harpoon', shield: false, score: 0,
-      invulnUntil: 0, connected: true, fireHeld: false, nextFireTick: 0, trapped: false, combo: 1, comboUntil: 0,
-    })),
-  };
-}
+// Minimal game: players have x/y, `go` moves +1 x per tick.
+interface S { tick: number; players: { id: string; x: number; y: number; online: boolean }[] }
+interface I { go: boolean; seq: number }
+const IDLE: I = { go: false, seq: 0 };
 
 function fakeSim() {
-  const calls: Record<PlayerId, InputState>[] = [];
-  const sim: SimFns = {
-    createGame: (_seed, players) => mkState(players),
-    step: (state, inputs) => {
+  const calls: Record<PlayerId, I>[] = [];
+  const sim: GameSim<S, I, string> = {
+    tickRate: 60,
+    emptyInput: IDLE,
+    createGame: (_seed, players: PlayerInfo[]) => ({
+      tick: 0, players: players.map((p, i) => ({ id: p.id, x: 100 + i * 100, y: 50, online: true })),
+    }),
+    step(state, inputs) {
       calls.push(inputs);
       state.tick++;
-      const me = state.players[0];
-      if (inputs[me.id]?.right) me.x += 1;
-      return [];
+      for (const p of state.players) if (inputs[p.id]?.go) p.x += 1;
+      return ['tick'];
+    },
+    ownPos: (s, id) => {
+      const p = s.players.find((q) => q.id === id);
+      return p ? { x: p.x, y: p.y } : null;
+    },
+    setOwnPos(s, id, pos) {
+      const p = s.players.find((q) => q.id === id)!;
+      p.x = pos.x;
+      p.y = pos.y;
+    },
+    setConnected(s, id, on) {
+      s.players.find((q) => q.id === id)!.online = on;
     },
   };
   return { sim, calls };
 }
 
 const payload: StartPayload = {
-  seed: 1,
+  seed: 1, game: 'bubble', mode: 'x',
   players: [{ id: 'h', name: 'h', color: 1 }, { id: 'c', name: 'c', color: 2 }],
-  levelIndex: 0,
-  mode: 'classic',
 };
+const snapOf = (xs: [number, number], tick = 0): S => ({
+  tick, players: [{ id: 'h', x: xs[0], y: 50, online: true }, { id: 'c', x: xs[1], y: 50, online: true }],
+});
 
 describe('GameLoop host', () => {
-  it('runs fixed 60 Hz steps with an accumulator and caps catch-up at 5', () => {
+  it('runs fixed steps with an accumulator and caps catch-up at 5', () => {
     const { s, emit } = fakeSession(true);
     const { sim, calls } = fakeSim();
     const loop = new GameLoop(s, sim);
     emit('start', payload);
     loop.update(STEP_MS * 0.5);
     expect(calls.length).toBe(0);
-    loop.update(STEP_MS * 0.6); // 1.1 steps accumulated
-    expect(calls.length).toBe(1);
+    expect(loop.update(STEP_MS * 0.6)).toEqual(['tick']);
     loop.update(STEP_MS * 2);
     expect(calls.length).toBe(3);
     loop.update(1000); // huge hitch
@@ -82,7 +65,18 @@ describe('GameLoop host', () => {
     expect(calls.length).toBe(8);
   });
 
-  it('broadcasts a snapshot every 8 ticks', () => {
+  it('uses the sim tick rate', () => {
+    const { s, emit } = fakeSession(true);
+    const { sim, calls } = fakeSim();
+    const loop = new GameLoop(s, { ...sim, tickRate: 30 });
+    emit('start', payload);
+    loop.update(1000 / 60 + 1);
+    expect(calls.length).toBe(0);
+    loop.update(1000 / 60);
+    expect(calls.length).toBe(1);
+  });
+
+  it('broadcasts a snapshot (with inputs) every 8 ticks', () => {
     const { s, emit } = fakeSession(true);
     const loop = new GameLoop(s, fakeSim().sim);
     emit('start', payload);
@@ -90,166 +84,143 @@ describe('GameLoop host', () => {
     expect(s.sendSnapshot).not.toHaveBeenCalled();
     for (let i = 0; i < 17; i++) loop.update(STEP_MS);
     expect(s.sendSnapshot).toHaveBeenCalledTimes(3);
+    expect(s.sendSnapshot.mock.calls[0][1]).toEqual({ h: IDLE, c: IDLE });
   });
 
-  it('feeds local input + latest remote input per player', () => {
+  it('feeds local input + latest remote input per player, never sends input', () => {
     const { s, emit } = fakeSession(true);
     const { sim, calls } = fakeSim();
     const loop = new GameLoop(s, sim);
     emit('start', payload);
-    loop.setLocalInput({ ...IDLE, fire: true });
-    emit('input', 'c', { ...IDLE, left: true });
+    loop.setLocalInput({ go: true, seq: 1 });
+    emit('input', 'c', { go: false, seq: 4 });
     loop.update(STEP_MS);
-    expect(calls[0].h.fire).toBe(true);
-    expect(calls[0].c.left).toBe(true);
+    expect(calls[0]).toEqual({ h: { go: true, seq: 1 }, c: { go: false, seq: 4 } });
     expect(s.sendInput).not.toHaveBeenCalled();
   });
 
-  it('takes a client-reported x, but not for trapped players or keepalives', () => {
+  it('applies a client-reported pos via setOwnPos, not on keepalives', () => {
     const { s, emit } = fakeSession(true);
     const loop = new GameLoop(s, fakeSim().sim);
     emit('start', payload);
-    const c = () => loop.state!.players.find((p) => p.id === 'c')!;
-    emit('input', 'c', IDLE, 444);
-    expect(c().x).toBe(444);
+    const c = () => loop.state!.players[1];
+    emit('input', 'c', IDLE, { x: 444, y: 7 });
+    expect(c()).toMatchObject({ x: 444, y: 7 });
     emit('input', 'c', IDLE, undefined);
-    expect(c().x).toBe(444);
-    c().trapped = true;
-    emit('input', 'c', IDLE, 10);
     expect(c().x).toBe(444);
   });
 
-  it('marks players that left presence as disconnected', () => {
+  it('reports presence changes through setConnected', () => {
     const { s, emit } = fakeSession(true);
     const loop = new GameLoop(s, fakeSim().sim);
     emit('start', payload);
     emit('players', [s.self]);
-    expect(loop.state!.players.find((p) => p.id === 'c')!.connected).toBe(false);
+    expect(loop.state!.players.map((p) => p.online)).toEqual([true, false]);
+  });
+
+  it('restarts on a new start payload', () => {
+    const { s, emit } = fakeSession(true);
+    const loop = new GameLoop(s, fakeSim().sim);
+    emit('start', payload);
+    loop.update(STEP_MS * 3);
+    emit('start', payload);
+    expect(loop.state!.tick).toBe(0);
   });
 });
 
 describe('GameLoop client', () => {
-  it('sends input only when it changes', () => {
+  it('sends input only when it changes (deep compare), with own pos', () => {
     const { s, emit } = fakeSession(false);
     const loop = new GameLoop(s, fakeSim().sim);
     emit('start', payload);
     loop.setLocalInput(IDLE);
-    loop.setLocalInput(IDLE);
+    loop.setLocalInput({ ...IDLE });
     expect(s.sendInput).toHaveBeenCalledTimes(1);
-    loop.setLocalInput({ ...IDLE, right: true });
-    loop.setLocalInput({ ...IDLE, right: true });
+    loop.state!.players[1].x = 321;
+    loop.setLocalInput({ go: true, seq: 0 });
+    loop.setLocalInput({ go: true, seq: 0 });
     expect(s.sendInput).toHaveBeenCalledTimes(2);
+    expect(s.sendInput).toHaveBeenLastCalledWith({ go: true, seq: 0 }, { x: 321, y: 50 });
     loop.update(1100); // no keepalive here: the net layer owns that
     expect(s.sendInput).toHaveBeenCalledTimes(2);
     expect(s.sendSnapshot).not.toHaveBeenCalled();
   });
 
-  it('predicts locally with own input and idle input for others', () => {
+  it('sends no pos for games without ownPos', () => {
+    const { s, emit } = fakeSession(false);
+    const { ownPos: _o, setOwnPos: _s, ...sim } = fakeSim().sim;
+    const loop = new GameLoop(s, sim);
+    emit('start', payload);
+    loop.setLocalInput(IDLE);
+    expect(s.sendInput).toHaveBeenLastCalledWith(IDLE, undefined);
+  });
+
+  it('predicts with own input and snapshot inputs for others', () => {
     const { s, emit } = fakeSession(false);
     const { sim, calls } = fakeSim();
     const loop = new GameLoop(s, sim);
     emit('start', payload);
-    loop.setLocalInput({ ...IDLE, fire: true });
+    loop.setLocalInput({ go: true, seq: 0 });
     loop.update(STEP_MS);
-    expect(calls[0].c.fire).toBe(true);
-    expect(calls[0].h).toEqual(IDLE);
+    expect(calls[0]).toEqual({ c: { go: true, seq: 0 }, h: IDLE });
+    emit('snapshot', snapOf([0, 0]), { h: { go: true, seq: 2 } });
+    loop.update(STEP_MS);
+    expect(calls.at(-1)!.h).toEqual({ go: true, seq: 2 });
   });
 
-  it('keeps own x (client-authoritative) unless far off or trapped', () => {
+  it('fast-forwards snapshots SNAPSHOT_LEAD_TICKS ticks', () => {
     const { s, emit } = fakeSession(false);
     const loop = new GameLoop(s, fakeSim().sim);
     emit('start', payload);
-    const localX = loop.state!.players.find((p) => p.id === 'c')!.x;
+    emit('snapshot', snapOf([500, 200], 10), { h: { go: true, seq: 0 } });
+    expect(loop.state!.tick).toBe(10 + SNAPSHOT_LEAD_TICKS);
+    expect(loop.state!.players[0].x).toBe(500 + SNAPSHOT_LEAD_TICKS);
+  });
 
-    const near = mkState(payload.players);
-    near.players[1].x = localX + 100;
-    near.players[0].x = 555;
-    emit('snapshot', near);
+  it('keeps own pos (client-authoritative) unless farther than reconcileDist', () => {
+    const { s, emit } = fakeSession(false);
+    const loop = new GameLoop(s, fakeSim().sim, { reconcileDist: 50 });
+    emit('start', payload);
+    const localX = loop.state!.players[1].x;
+    emit('snapshot', snapOf([555, localX + 40]));
     expect(loop.state!.players[1].x).toBe(localX);
-    expect(loop.state!.players[0].x).toBe(555); // others always taken from snapshot
-
-    const far = mkState(payload.players);
-    far.players[1].x = localX + 150;
-    emit('snapshot', far);
-    expect(loop.state!.players[1].x).toBe(localX + 150);
-
-    const trapped = mkState(payload.players);
-    trapped.players[1].x = localX + 160;
-    trapped.players[1].trapped = true;
-    emit('snapshot', trapped);
-    expect(loop.state!.players[1].x).toBe(localX + 160);
+    expect(loop.state!.players[0].x).toBe(555); // others always from the snapshot
+    emit('snapshot', snapOf([555, localX + 60]));
+    expect(loop.state!.players[1].x).toBe(localX + 60);
   });
 
-  it('sends own x with input changes and predicts others with snapshot inputs', () => {
+  it('runs prepareSnapshot before and onSnapshot after fast-forward, draining events in update()', () => {
     const { s, emit } = fakeSession(false);
-    const { sim, calls } = fakeSim();
-    const loop = new GameLoop(s, sim);
-    emit('start', payload);
-    loop.state!.players[1].x = 321;
-    loop.setLocalInput({ ...IDLE, right: true });
-    expect(s.sendInput).toHaveBeenLastCalledWith({ ...IDLE, right: true }, 321);
-    emit('snapshot', mkState(payload.players), { h: { ...IDLE, left: true } });
-    loop.update(STEP_MS);
-    expect(calls.at(-1)!.h).toEqual({ ...IDLE, left: true });
-  });
-
-  it('keeps my own god cloud x (unless far off) and charge across snapshots', () => {
-    const { s, emit } = fakeSession(false);
-    const loop = new GameLoop(s, fakeSim().sim);
-    emit('start', payload);
-    const god = (x: number, charge: number) => ({
-      godId: 'c', x, mana: 5, charge, chargeStart: 10, nextDropTick: 0, round: 0, roundEndsTick: 0,
-      roundWins: {}, order: ['c', 'h'], aiTargetX: 0, aiTargetSize: 0,
+    const seen: number[] = [];
+    const loop = new GameLoop(s, fakeSim().sim, {
+      prepareSnapshot: (_p, n) => void seen.push(n.tick),
+      onSnapshot: (prev, next) => {
+        seen.push(next.tick);
+        return [`snap ${prev?.tick}`];
+      },
+      fastForward: (n) => n.tick > 0,
     });
-    loop.state!.god = god(300, 2);
-    const near = mkState(payload.players);
-    near.god = god(450, -1);
-    emit('snapshot', near);
-    expect(loop.state!.god!.x).toBe(300);
-    expect(loop.state!.god!.charge).toBe(2);
-    const far = mkState(payload.players);
-    far.god = god(520, -1);
-    emit('snapshot', far);
-    expect(loop.state!.god!.x).toBe(520);
-  });
-
-  it('synthesizes pop events for balls that disappeared in a snapshot', () => {
-    const { s, emit } = fakeSession(false);
-    const loop = new GameLoop(s, fakeSim().sim);
     emit('start', payload);
-    loop.state!.balls.push({ id: 1, x: 10, y: 20, vx: 0, vy: 0, size: 2, color: 0xff0000 });
-    emit('snapshot', mkState(payload.players));
-    const ev = loop.update(0);
-    expect(ev).toEqual([{ type: 'pop', x: 10, y: 20, size: 2, playerId: '', points: 0, combo: 1 }]);
-  });
-
-  it('smooths snapshot jumps of balls and other players, never my own player', () => {
-    const { s, emit } = fakeSession(false);
-    const loop = new GameLoop(s, fakeSim().sim);
-    emit('start', payload);
-    loop.state!.balls.push({ id: 1, x: 100, y: 100, vx: 0, vy: 0, size: 1, color: 1 });
-    const snap = mkState(payload.players);
-    snap.balls.push({ id: 1, x: 110, y: 100, vx: 0, vy: 0, size: 1, color: 1 });
-    snap.players[0].x += 20; // host player (other)
-    emit('snapshot', snap);
-    expect(loop.smooth.at('b1', 110, 100)).toEqual({ x: 100, y: 100 });
-    expect(loop.smooth.at('ph', snap.players[0].x, 480).x).toBe(snap.players[0].x - 20);
-    expect(loop.smooth.at('pc', 5, 5)).toEqual({ x: 5, y: 5 });
+    emit('snapshot', snapOf([0, 0], 0));
+    emit('snapshot', snapOf([0, 0], 5));
+    expect(seen).toEqual([0, 0, 5, 5 + SNAPSHOT_LEAD_TICKS]);
+    expect(loop.update(0)).toEqual(['snap 0', 'snap 0']);
+    expect(loop.update(0)).toEqual([]);
   });
 
   it('reports snapshot interval avg/max over the last 2 s', () => {
     const { s, emit } = fakeSession(false);
     let t = 0;
-    const loop = new GameLoop(s, fakeSim().sim, () => {}, () => t);
+    const loop = new GameLoop(s, fakeSim().sim, { now: () => t });
     emit('start', payload);
     expect(loop.snapshotStats()).toBeNull();
     for (const gap of [0, 130, 140, 400]) {
       t += gap;
-      emit('snapshot', mkState(payload.players));
+      emit('snapshot', snapOf([0, 0]));
     }
     expect(loop.snapshotStats()).toEqual({ avg: 670 / 3, max: 400 });
     t += 3000; // old samples drop out, and a stall shows up as max
-    emit('snapshot', mkState(payload.players));
+    emit('snapshot', snapOf([0, 0]));
     t += 500;
     expect(loop.snapshotStats()!.max).toBe(3000);
   });
@@ -257,7 +228,7 @@ describe('GameLoop client', () => {
   it('calls onHostLeft and unsubscribes on dispose', () => {
     const { s, emit } = fakeSession(false);
     const left = vi.fn();
-    const loop = new GameLoop(s, fakeSim().sim, left);
+    const loop = new GameLoop(s, fakeSim().sim, { onHostLeft: left });
     emit('hostLeft');
     expect(left).toHaveBeenCalledTimes(1);
     loop.dispose();
@@ -265,5 +236,14 @@ describe('GameLoop client', () => {
     emit('start', payload);
     expect(left).toHaveBeenCalledTimes(1);
     expect(loop.state).toBeNull();
+  });
+});
+
+describe('startPayload', () => {
+  it('carries the session game, mode and optional level', () => {
+    const { s } = fakeSession(true);
+    const p = startPayload(s, 'god', 2);
+    expect(p).toMatchObject({ game: 'bubble', mode: 'god', levelIndex: 2, players: [{ id: 'h', name: 'h', color: 0xff0000 }] });
+    expect('levelIndex' in startPayload(s, 'pvp')).toBe(false);
   });
 });

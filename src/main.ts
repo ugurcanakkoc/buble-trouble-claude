@@ -1,10 +1,10 @@
 import Phaser from 'phaser';
+import { GAME_SCENES } from './games/registry';
 import './ui/overlay.css';
 import { mountMuteButton } from './ui/audio';
 import { h } from './ui/dom';
 import { mountFullscreen } from './ui/fullscreen';
 import { mountSettingsButton } from './ui/settings';
-import { GameScene } from './ui/scenes/GameScene';
 import { LobbyScene } from './ui/scenes/LobbyScene';
 import { MenuScene } from './ui/scenes/MenuScene';
 
@@ -23,7 +23,7 @@ async function boot() {
     backgroundColor: '#0d1020',
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     input: { activePointers: 4 },
-    scene: [MenuScene, LobbyScene, GameScene],
+    scene: [MenuScene, LobbyScene, ...GAME_SCENES], // game scenes: see games/registry.ts
   });
 
   mountMuteButton();

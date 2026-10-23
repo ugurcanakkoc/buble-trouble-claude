@@ -131,32 +131,39 @@ canvas { display: block; }
   display: flex; align-items: center; justify-content: center; padding: 0; z-index: 30;
 }
 
-/* touch controls: ◀ ▶ in one side gutter, ATEŞ in the other (.swap flips sides).
-   While controls are shown, #app is narrowed by the gutters so the canvas never sits under them. */
-:root { --g-move: calc(134px + env(safe-area-inset-left)); --g-fire: calc(114px + env(safe-area-inset-right)); }
+/* touch controls (ui/touch.ts): one group per side gutter (.side-l/.side-r, swapped by the setting).
+   While controls are shown, #app is narrowed by the measured gutters (--gl/--gr) so the canvas never sits under them. */
+:root { --gl: 0px; --gr: 0px; }
 @media (orientation: landscape) {
-  body.controls #app { width: calc(100% - var(--g-move) - var(--g-fire)); margin-left: var(--g-move); }
-  body.controls.swapped #app { margin-left: var(--g-fire); }
+  body.controls #app { width: calc(100% - var(--gl) - var(--gr)); margin-left: var(--gl); }
 }
 .touch { position: fixed; inset: 0; pointer-events: none !important; z-index: 20; }
 .touch .tgroup {
   position: absolute; bottom: calc(10px + env(safe-area-inset-bottom)); display: flex; gap: 8px; align-items: flex-end;
 }
-.touch .move { left: calc(8px + env(safe-area-inset-left)); }
-.touch .shoot { right: calc(8px + env(safe-area-inset-right)); }
-.touch.swap .move { left: auto; right: calc(8px + env(safe-area-inset-right)); }
-.touch.swap .shoot { right: auto; left: calc(8px + env(safe-area-inset-left)); }
+.touch .side-l { left: calc(8px + env(safe-area-inset-left)); }
+.touch .side-r { right: calc(8px + env(safe-area-inset-right)); }
+.touch .tgroup.grid { display: grid; grid-template-columns: repeat(2, auto); }
+.touch .tgroup.dpad { display: grid; grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(3, 56px); gap: 4px; }
+.touch .dpad .tbtn { width: 56px; height: 56px; }
+.touch .dpad .u { grid-area: 1 / 2; } .touch .dpad .l { grid-area: 2 / 1; }
+.touch .dpad .r { grid-area: 2 / 3; } .touch .dpad .d { grid-area: 3 / 2; }
 .touch .tbtn {
   pointer-events: auto; width: 58px; height: 120px; border-radius: 29px;
   background: rgba(255, 255, 255, .13); border: 3px solid rgba(255, 255, 255, .32); box-sizing: border-box;
   color: rgba(255, 255, 255, .85); font: 700 30px var(--font); display: flex; align-items: center; justify-content: center;
-  touch-action: none; -webkit-tap-highlight-color: transparent; transition: transform .06s, background .06s;
+  text-align: center; line-height: 1.05; overflow: hidden;
+  touch-action: none; -webkit-tap-highlight-color: transparent; transition: transform .06s, background .06s, opacity .15s;
 }
 .touch .tbtn.on { background: rgba(255, 255, 255, .36); transform: scale(.94); }
-.touch .tbtn.fire { width: 100px; height: 100px; border-radius: 50%; font-size: 24px; background: rgba(255, 79, 139, .38); border-color: rgba(255, 160, 190, .7); }
-.touch .tbtn.fire.on { background: rgba(255, 79, 139, .75); }
+.touch .tbtn.small { width: 52px; height: 52px; font-size: 15px; }
+.touch .tbtn.big { width: 100px; height: 100px; font-size: 24px; background: rgba(255, 79, 139, .38); border-color: rgba(255, 160, 190, .7); }
+.touch .tbtn.big.on { background: rgba(255, 79, 139, .75); }
+.touch .tbtn.circle { border-radius: 50%; }
+.touch .tbtn.square { border-radius: 14px; }
+.touch .tbtn.off { opacity: .35; }
 @media (min-height: 600px) {
-  .touch .tbtn { height: 150px; }
+  .touch .tbtn.normal { height: 150px; }
 }
 
 /* settings */
@@ -237,4 +244,46 @@ canvas { display: block; }
   .card.lobby .mode { min-height: 62px; }
   /* leave room for the ⛶ ⚙ 🔊 buttons in the top-right corner */
   .screen { padding-top: 48px; }
+}
+
+/* menu: game picker (one column; two columns on short landscape phones) */
+.card.menu { width: min(600px, 100%); }
+.menu .col { display: flex; flex-direction: column; gap: inherit; }
+.games { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.gcard {
+  font: 600 14px var(--font); color: var(--muted); background: #0f1330; border: 3px solid var(--panel-edge);
+  border-radius: 18px; padding: 12px 6px 10px; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  cursor: pointer; touch-action: manipulation; transition: border-color .15s, transform .08s; position: relative;
+}
+.gcard:hover:not(:disabled) { transform: translateY(-2px); }
+.gcard .icon { font-size: 40px; line-height: 1.1; }
+.gcard b { font-size: 20px; color: var(--text); }
+.gcard small { font-size: 13px; line-height: 1.15; min-height: 30px; }
+.gcard .range { font-size: 13px; color: var(--cyan); font-weight: 700; }
+.gcard.on { border-color: var(--yellow); background: #2a2550; box-shadow: 0 0 0 3px rgba(255, 210, 63, .25); }
+.gcard.soon { opacity: .5; cursor: default; }
+.gcard.soon .range { color: var(--yellow); }
+.game-head { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 24px; }
+.game-head b { color: var(--yellow); }
+.players-head { display: flex; justify-content: space-between; margin-bottom: -6px; }
+.players-head .count { color: var(--cyan); font-weight: 700; }
+.endline { font-size: 20px; }
+@media (max-height: 430px) {
+  .gcard { padding: 6px 4px; gap: 1px; border-radius: 14px; }
+  .gcard .icon { font-size: 26px; }
+  .gcard b { font-size: 16px; }
+  .gcard small { display: none; }
+  .game-head { font-size: 18px; }
+  .players-head { margin-bottom: 0; }
+}
+@media (max-height: 430px) and (orientation: landscape) {
+  .card.menu { flex-direction: row; width: min(720px, 100%); align-items: stretch; }
+  .card.menu .col { flex: 1.5; min-width: 0; justify-content: center; }
+  .card.menu .col.side { flex: 1; }
+}
+@media (max-height: 760px) and (min-height: 431px) {
+  .card.menu { gap: 10px; padding-top: 16px; padding-bottom: 18px; }
+  .menu .subtitle { display: none; }
+  .menu .error { min-height: 0; }
+  .gcard .icon { font-size: 32px; }
 }

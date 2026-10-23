@@ -1,101 +1,93 @@
-// Host/client game loop controller. No Phaser here: the scene feeds it frame deltas and the local
-// input, and reads `state` + the returned events. Sim functions are injected so tests can stub them.
-import { EMPTY_INPUT, type GameMode, type GameState, type InputState, type PlayerId, type PlayerInfo, type SimEvent } from '../sim';
-import type { RoomSession, StartPayload } from '../net';
-import { Smoother } from './render/smooth';
+// Generic host/client game loop for any GameSim. No Phaser here: the scene feeds it frame deltas and
+// the local input, and reads `state` + the returned events.
+//  host:   fixed-step sim with the latest input per player, snapshot to clients every 8 ticks
+//  client: local prediction (own input + others' inputs from the last snapshot); each snapshot replaces
+//          the state, fast-forwarded SNAPSHOT_LEAD_TICKS, with the client-authoritative own position kept
+import type { GameSim } from '../games/types';
+import type { PlayerId } from '../sim/types';
+import type { Pos, RoomSession, StartPayload } from '../net';
 
-export const STEP_MS = 1000 / 60;
 export const MAX_STEPS_PER_FRAME = 5;
 export const SNAPSHOT_EVERY = 8; // ticks -> 7.5 Hz (keeps 4 players under the 100 msg/s budget)
-// Clients own their movement (they send x with each input change), so a snapshot only overrides
-// their x when it is far off: level reset, trap, or a lost message.
-export const RECONCILE_X = 120;
-export const RECONCILE_CLOUD_X = 200;
-// A snapshot is ~65 ms old on arrival (measured one-way latency): replay this many ticks on top of
-// it so balls don't visibly jump back on every snapshot.
+// A snapshot is ~65 ms old on arrival (measured one-way latency): replay this many ticks on top of it.
 export const SNAPSHOT_LEAD_TICKS = 4;
+// Own position from a snapshot only wins when it is this far off (reset, trap, lost message).
+export const RECONCILE_DIST = 120;
+export const STEP_MS = 1000 / 60;
 
-const NO_INPUT = EMPTY_INPUT;
-
-export interface SimFns {
-  createGame(seed: number, players: PlayerInfo[], levelIndex?: number, mode?: GameMode): GameState;
-  step(state: GameState, inputs: Record<PlayerId, InputState>): SimEvent[];
+export interface LoopOptions<S, E> {
+  onHostLeft?: () => void;
+  /** Max distance (world units) at which the client keeps its own position over the snapshot's. */
+  reconcileDist?: number | ((snap: S, selfId: PlayerId) => number);
+  /** Client only, after fast-forward + own-pos restore: return synthesized events (drained by update()). */
+  onSnapshot?(prev: S | null, next: S): E[];
+  /** Client only, before fast-forward: patch `next` with local-only state (e.g. a held charge). */
+  prepareSnapshot?(prev: S | null, next: S): void;
+  /** Whether to fast-forward this snapshot (default: always). */
+  fastForward?(snap: S): boolean;
+  now?: () => number; // tests
 }
-
-const sameInput = (a: InputState, b: InputState) =>
-  (Object.keys(a) as (keyof InputState)[]).every((k) => a[k] === b[k]);
 
 export function randomSeed(): number {
   return (Math.random() * 0x100000000) >>> 0;
 }
 
-export function startPayload(session: RoomSession, levelIndex = 0, mode: GameMode = 'classic'): StartPayload {
+/** Payload for session.startGame (lobby start and "Tekrar Oyna"). */
+export function startPayload(session: RoomSession, mode: string, levelIndex?: number): StartPayload {
   return {
     seed: randomSeed(),
     players: session.players().map(({ id, name, color }) => ({ id, name, color })),
-    levelIndex,
+    game: session.game,
     mode,
+    ...(levelIndex === undefined ? {} : { levelIndex }),
   };
 }
 
-/** The position a player controls: their floor x, or the cloud x while they are the god. */
-function ownX(state: GameState, id: PlayerId): number {
-  if (state.god?.godId === id) return state.god.x;
-  return state.players.find((p) => p.id === id)?.x ?? 0;
-}
-
-function setOwnX(state: GameState, id: PlayerId, x: number, floorOnly = false): void {
-  if (state.god?.godId === id && !floorOnly) state.god.x = x;
-  else {
-    const p = state.players.find((q) => q.id === id);
-    if (p && !p.trapped) p.x = x;
-  }
-}
-
-export class GameLoop {
-  state: GameState | null = null;
+export class GameLoop<S, I, E = unknown> {
+  state: S | null = null;
   private acc = 0;
   private steps = 0;
-  private local: InputState = NO_INPUT;
-  private lastSent: InputState | null = null;
-  private remote: Record<PlayerId, InputState> = {};
-  private pending: SimEvent[] = []; // events synthesized from snapshots, drained by update()
+  private ids: PlayerId[] = [];
+  private local: I;
+  private lastSent: string | null = null;
+  private remote: Record<PlayerId, I> = {};
+  private pending: E[] = [];
   private offs: (() => void)[] = [];
-  /** Client-only render smoothing of snapshot corrections (host never corrects, so it stays 0). */
-  readonly smooth = new Smoother();
   private snapTimes: number[] = []; // arrival times (ms) of recent snapshots
+  private readonly stepMs: number;
+  private readonly now: () => number;
 
   constructor(
     private session: RoomSession,
-    private sim: SimFns,
-    onHostLeft: () => void = () => {},
-    private now: () => number = () => performance.now(),
+    private sim: GameSim<S, I, E>,
+    private opts: LoopOptions<S, E> = {},
   ) {
+    this.local = sim.emptyInput;
+    this.stepMs = 1000 / sim.tickRate;
+    this.now = opts.now ?? (() => performance.now());
     const s = session;
     this.offs.push(s.onStart((p) => this.start(p)));
     if (s.isHost) {
       this.offs.push(
-        s.onInput((id, input, x) => {
-          this.remote[id] = input;
-          if (x !== undefined && this.state) setOwnX(this.state, id, x);
+        s.onInput((id, input, pos) => {
+          this.remote[id] = input as I;
+          if (pos && this.state) this.sim.setOwnPos?.(this.state, id, pos);
         }),
-      );
-      this.offs.push(
         s.onPlayersChange((list) => {
-          if (!this.state) return;
+          if (!this.state || !this.sim.setConnected) return;
           const present = new Set(list.map((p) => p.id));
-          for (const p of this.state.players) p.connected = present.has(p.id);
+          for (const id of this.ids) this.sim.setConnected(this.state, id, present.has(id));
         }),
       );
     } else {
       this.offs.push(
         s.onSnapshot((snap, inputs) => {
           this.noteSnapshot(this.now());
-          this.remote = inputs ?? {};
-          this.applySnapshot(snap);
+          this.remote = (inputs ?? {}) as Record<PlayerId, I>;
+          this.applySnapshot(snap as S);
         }),
+        s.onHostLeft(() => opts.onHostLeft?.()),
       );
-      this.offs.push(s.onHostLeft(onHostLeft));
     }
   }
 
@@ -104,24 +96,28 @@ export class GameLoop {
   }
 
   start(p: StartPayload): void {
-    this.state = this.sim.createGame(p.seed, p.players, p.levelIndex, p.mode);
+    this.ids = p.players.map((q) => q.id);
+    this.state = this.sim.createGame(p.seed, p.players, p.mode, p.levelIndex);
     this.acc = 0;
     this.steps = 0;
     this.pending = [];
   }
 
-  setLocalInput(input: InputState): void {
-    this.local = { ...input };
-    if (!this.session.isHost && (!this.lastSent || !sameInput(this.lastSent, this.local))) this.send();
+  setLocalInput(input: I): void {
+    this.local = input;
+    if (this.session.isHost) return;
+    const key = JSON.stringify(input);
+    if (key === this.lastSent) return;
+    this.lastSent = key; // keepalive resends are handled inside the net layer
+    this.session.sendInput(input, this.ownPos(this.state) ?? undefined);
   }
 
-  private send(): void {
-    this.lastSent = this.local; // keepalive resends are handled inside the net layer
-    this.session.sendInput(this.local, this.state ? ownX(this.state, this.selfId) : 0);
+  private ownPos(s: S | null): Pos | null {
+    return s && this.sim.ownPos ? this.sim.ownPos(s, this.selfId) : null;
   }
 
   /** Advance by a frame delta (ms). Returns sim/synthesized events produced during this frame. */
-  update(dtMs: number): SimEvent[] {
+  update(dtMs: number): E[] {
     const events = this.pending;
     this.pending = [];
     const state = this.state;
@@ -129,76 +125,39 @@ export class GameLoop {
 
     this.acc += dtMs;
     let n = 0;
-    while (this.acc >= STEP_MS && n < MAX_STEPS_PER_FRAME) {
-      this.acc -= STEP_MS;
+    while (this.acc >= this.stepMs && n < MAX_STEPS_PER_FRAME) {
+      this.acc -= this.stepMs;
       n++;
-      events.push(...this.sim.step(state, this.inputs(state)));
+      events.push(...this.sim.step(state, this.inputs()));
       this.steps++;
-      if (this.session.isHost && this.steps % SNAPSHOT_EVERY === 0) this.session.sendSnapshot(state, this.inputs(state));
+      if (this.session.isHost && this.steps % SNAPSHOT_EVERY === 0) this.session.sendSnapshot(state, this.inputs());
     }
-    if (this.acc >= STEP_MS) this.acc = 0; // too far behind (tab was hidden): drop the backlog
+    if (this.acc >= this.stepMs) this.acc = 0; // too far behind (tab was hidden): drop the backlog
     return events;
   }
 
-  private inputs(state: GameState): Record<PlayerId, InputState> {
-    const out: Record<PlayerId, InputState> = {};
-    for (const p of state.players) {
-      // host: latest received input per player; client: others' inputs as of the last snapshot
-      out[p.id] = p.id === this.selfId ? this.local : this.remote[p.id] ?? NO_INPUT;
-    }
+  private inputs(): Record<PlayerId, I> {
+    const out: Record<PlayerId, I> = {};
+    // host: latest received input per player; client: others' inputs as of the last snapshot
+    for (const id of this.ids) out[id] = id === this.selfId ? this.local : this.remote[id] ?? this.sim.emptyInput;
     return out;
   }
 
-  applySnapshot(snap: GameState): void {
+  applySnapshot(snap: S): void {
     const prev = this.state;
-    let keepX: number | null = null;
-    let keepCloudX: number | null = null;
-    if (prev) {
-      const mine = prev.players.find((p) => p.id === this.selfId);
-      const theirs = snap.players.find((p) => p.id === this.selfId);
-      if (mine && theirs && !theirs.trapped && Math.abs(mine.x - theirs.x) < RECONCILE_X) keepX = mine.x;
-      // Same for my god cloud (it moves faster, so a wider window), and keep my own charge
-      // so hold-to-grow feedback isn't reset by every lagging snapshot.
-      if (prev.god && snap.god && snap.god.godId === this.selfId && prev.god.godId === this.selfId) {
-        if (Math.abs(prev.god.x - snap.god.x) < RECONCILE_CLOUD_X) keepCloudX = prev.god.x;
-        snap.god.charge = prev.god.charge;
-        snap.god.chargeStart = prev.god.chargeStart;
-      }
+    const { reconcileDist = RECONCILE_DIST } = this.opts;
+    const mine = this.ownPos(prev);
+    const theirs = this.ownPos(snap);
+    const limit = typeof reconcileDist === 'number' ? reconcileDist : reconcileDist(snap, this.selfId);
+    const keep = mine && theirs && Math.hypot(mine.x - theirs.x, mine.y - theirs.y) < limit ? mine : null;
 
-      // Balls that existed locally but are gone in the snapshot were popped by someone else:
-      // synthesize pop events so every client gets the sound + particles.
-      if (prev.levelIndex === snap.levelIndex && snap.phase !== 'ready') {
-        const alive = new Set(snap.balls.map((b) => b.id));
-        for (const b of prev.balls) {
-          if (!alive.has(b.id)) this.pending.push({ type: 'pop', x: b.x, y: b.y, size: b.size, playerId: '', points: 0, combo: 1 });
-        }
-      }
+    this.opts.prepareSnapshot?.(prev, snap);
+    if (this.opts.fastForward?.(snap) ?? true) {
+      for (let i = 0; i < SNAPSHOT_LEAD_TICKS; i++) this.sim.step(snap, this.inputs());
     }
-    // fast-forward to "now", then put my own (client-authoritative) position back on top
-    if (snap.phase === 'playing') for (let i = 0; i < SNAPSHOT_LEAD_TICKS; i++) this.sim.step(snap, this.inputs(snap));
-    if (keepX !== null) setOwnX(snap, this.selfId, keepX, true);
-    if (keepCloudX !== null && snap.god) snap.god.x = keepCloudX;
-    this.recordCorrections(prev, snap);
+    if (keep) this.sim.setOwnPos?.(snap, this.selfId, keep);
+    if (this.opts.onSnapshot) this.pending.push(...this.opts.onSnapshot(prev, snap));
     this.state = snap;
-  }
-
-  /** Turn snapshot jumps of balls / other players / someone else's cloud into smoothing offsets. */
-  private recordCorrections(prev: GameState | null, snap: GameState): void {
-    if (!prev || prev.levelIndex !== snap.levelIndex || (snap.phase === 'ready' && prev.phase !== 'ready')) {
-      this.smooth.clear();
-      return;
-    }
-    const balls = new Map(prev.balls.map((b) => [b.id, b]));
-    for (const b of snap.balls) {
-      const o = balls.get(b.id);
-      if (o) this.smooth.correct(`b${b.id}`, o.x, o.y, b.x, b.y);
-    }
-    const players = new Map(prev.players.map((p) => [p.id, p]));
-    for (const p of snap.players) {
-      const o = players.get(p.id);
-      if (o && p.id !== this.selfId) this.smooth.correct(`p${p.id}`, o.x, o.y, p.x, p.y);
-    }
-    if (prev.god && snap.god && snap.god.godId !== this.selfId) this.smooth.correct('god', prev.god.x, 0, snap.god.x, 0);
   }
 
   private noteSnapshot(t: number): void {

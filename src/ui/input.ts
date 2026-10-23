@@ -2,7 +2,7 @@
 // overlay's text fields is never swallowed.
 import { EMPTY_INPUT, type InputState } from '../sim';
 import { isTouch } from './dom';
-import { createTouchControls } from './touch';
+import { mountTouchControls } from './touch';
 
 type Action = 'left' | 'right' | 'fire';
 const KEYS: Record<string, Action> = {
@@ -23,13 +23,18 @@ export function createControls(): { read(): InputState; destroy(): void } {
   window.addEventListener('keydown', onDown);
   window.addEventListener('keyup', onUp);
   window.addEventListener('blur', clear);
-  const touch = isTouch() ? createTouchControls() : null;
+  const touch = isTouch()
+    ? mountTouchControls({
+        left: [{ id: 'left', label: '◀' }, { id: 'right', label: '▶' }],
+        right: [{ id: 'fire', label: 'ATEŞ', size: 'big' }],
+      })
+    : null;
 
   return {
     read() {
       const s: InputState = { ...EMPTY_INPUT };
       for (const code of down) s[KEYS[code]] = true;
-      if (touch) for (const k of ['left', 'right', 'fire'] as const) s[k] ||= touch.state[k];
+      if (touch) for (const k of ['left', 'right', 'fire'] as const) s[k] ||= touch.isDown(k);
       return s;
     },
     destroy() {
