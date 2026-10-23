@@ -4,11 +4,12 @@ import type Phaser from 'phaser';
 import { BubbleScene, bubbleGame } from './bubble';
 import type { GameDef, GameId } from './types';
 import { BombScene, bombGame } from './bomb';
+import { WarScene, warGame } from './war';
 
 type SceneClass = new () => Phaser.Scene;
 const READY: [GameDef, SceneClass][] = [
   [bubbleGame, BubbleScene],
-  // war: import { WarScene, warGame } from './war'; add [warGame, WarScene] when finished
+  [warGame, WarScene],
   [bombGame, BombScene],
 ];
 
