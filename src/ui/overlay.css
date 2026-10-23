@@ -131,32 +131,42 @@ canvas { display: block; }
   display: flex; align-items: center; justify-content: center; padding: 0; z-index: 30;
 }
 
-/* touch controls: move pair on one side, big fire on the other (.swap flips sides) */
+/* touch controls: ◀ ▶ in one side gutter, ATEŞ in the other (.swap flips sides).
+   While controls are shown, #app is narrowed by the gutters so the canvas never sits under them. */
+:root { --g-move: calc(134px + env(safe-area-inset-left)); --g-fire: calc(114px + env(safe-area-inset-right)); }
+@media (orientation: landscape) {
+  body.controls #app { width: calc(100% - var(--g-move) - var(--g-fire)); margin-left: var(--g-move); }
+  body.controls.swapped #app { margin-left: var(--g-fire); }
+}
 .touch { position: fixed; inset: 0; pointer-events: none !important; z-index: 20; }
 .touch .tgroup {
-  position: absolute; bottom: calc(12px + env(safe-area-inset-bottom)); display: flex; gap: 14px; align-items: flex-end;
+  position: absolute; bottom: calc(10px + env(safe-area-inset-bottom)); display: flex; gap: 8px; align-items: flex-end;
 }
-.touch .move { left: calc(12px + env(safe-area-inset-left)); }
-.touch .shoot { right: calc(12px + env(safe-area-inset-right)); }
-.touch.swap .move { left: auto; right: calc(12px + env(safe-area-inset-right)); }
-.touch.swap .shoot { right: auto; left: calc(12px + env(safe-area-inset-left)); }
+.touch .move { left: calc(8px + env(safe-area-inset-left)); }
+.touch .shoot { right: calc(8px + env(safe-area-inset-right)); }
+.touch.swap .move { left: auto; right: calc(8px + env(safe-area-inset-right)); }
+.touch.swap .shoot { right: auto; left: calc(8px + env(safe-area-inset-left)); }
 .touch .tbtn {
-  pointer-events: auto; width: 96px; height: 96px; border-radius: 50%;
-  background: rgba(255, 255, 255, .13); border: 3px solid rgba(255, 255, 255, .32);
-  color: rgba(255, 255, 255, .85); font: 700 36px var(--font); display: flex; align-items: center; justify-content: center;
+  pointer-events: auto; width: 58px; height: 120px; border-radius: 29px;
+  background: rgba(255, 255, 255, .13); border: 3px solid rgba(255, 255, 255, .32); box-sizing: border-box;
+  color: rgba(255, 255, 255, .85); font: 700 30px var(--font); display: flex; align-items: center; justify-content: center;
   touch-action: none; -webkit-tap-highlight-color: transparent; transition: transform .06s, background .06s;
 }
 .touch .tbtn.on { background: rgba(255, 255, 255, .36); transform: scale(.94); }
-.touch .tbtn.fire { width: 128px; height: 128px; font-size: 28px; background: rgba(255, 79, 139, .38); border-color: rgba(255, 160, 190, .7); }
+.touch .tbtn.fire { width: 100px; height: 100px; border-radius: 50%; font-size: 24px; background: rgba(255, 79, 139, .38); border-color: rgba(255, 160, 190, .7); }
 .touch .tbtn.fire.on { background: rgba(255, 79, 139, .75); }
-@media (max-height: 420px) {
-  .touch .tbtn { width: 84px; height: 84px; }
-  .touch .tbtn.fire { width: 112px; height: 112px; }
+@media (min-height: 600px) {
+  .touch .tbtn { height: 150px; }
 }
 
 /* settings */
 .gear { right: 66px; font-size: 24px; color: var(--text); }
 .fs { right: 122px; font-size: 24px; color: var(--text); }
+@media (max-height: 430px) {
+  .mute { width: 38px; height: 38px; top: 6px; right: 6px; font-size: 17px; border-width: 2px; }
+  .gear { right: 50px; font-size: 19px; }
+  .fs { right: 94px; font-size: 19px; }
+}
 .settings { position: fixed; z-index: 60; background: rgba(13, 16, 32, .7); }
 .settings[hidden], .board[hidden] { display: none; }
 .title.small { font-size: 34px; }
@@ -216,3 +226,15 @@ canvas { display: block; }
 .final tr.win td { background: #3a2f10; }
 .final { border-spacing: 0 6px; border-collapse: separate; }
 .card-body { display: flex; flex-direction: column; gap: 12px; }
+
+/* lobby: one column normally, two columns on short landscape screens (phones) */
+.lobby .col { display: flex; flex-direction: column; gap: inherit; }
+@media (max-height: 430px) and (orientation: landscape) {
+  .card.lobby { flex-direction: row; width: min(720px, 100%); align-items: stretch; }
+  .card.lobby .col { flex: 1; min-width: 0; justify-content: center; }
+  .card.lobby .code-big { font-size: 40px; }
+  .card.lobby .players li { font-size: 16px; padding: 4px 10px; }
+  .card.lobby .mode { min-height: 62px; }
+  /* leave room for the ⛶ ⚙ 🔊 buttons in the top-right corner */
+  .screen { padding-top: 48px; }
+}

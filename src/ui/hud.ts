@@ -1,7 +1,8 @@
 // Bottom HUD strip (y 480..540). Mode-aware:
-//  classic: level + name | time bar + hearts      | name + score per player
-//  god:     round + god   | round timer + mana bar | name + round wins
-//  rain:    "Yağmur" + min| survival clock + hearts| name + score
+//  classic: "Seviye N"   | time bar + hearts      | name + score per player
+//  god:     "Raund r/n"  | round timer + mana bar | name + round wins
+//  rain:    "⏱ m:ss"     | storm label + hearts   | name + score
+// Fonts are big on purpose: on a 844×390 phone the canvas is scaled to ~0.6.
 import Phaser from 'phaser';
 import { getLevel, MAX_PLAYERS, TICK_RATE, WORLD_H, WORLD_W, type GameState } from '../sim';
 import { GOD_BALANCE } from '../sim';
@@ -23,7 +24,6 @@ export const clock = (ticks: number) => {
 
 export class Hud {
   private line1: Phaser.GameObjects.Text;
-  private line2: Phaser.GameObjects.Text;
   private bar: Phaser.GameObjects.Graphics;
   private barText: Phaser.GameObjects.Text;
   private hearts: Phaser.GameObjects.Image[] = [];
@@ -38,19 +38,18 @@ export class Hud {
     g.fillStyle(0x22964a).fillRect(0, Y + 4, WORLD_W, 2);
     g.fillStyle(0x2c3468).fillRect(222, Y + 12, 2, 40).fillRect(SLOT_X - 6, Y + 12, 2, 40);
 
-    this.line1 = scene.add.text(14, Y + 5, '', txt(26, '#ffd23f')).setDepth(11);
-    this.line2 = scene.add.text(14, Y + 36, '', txt(18, '#c9c8f0')).setDepth(11);
+    this.line1 = scene.add.text(12, Y + 32, '', txt(32, '#ffd23f')).setOrigin(0, 0.5).setDepth(11);
     this.bar = scene.add.graphics().setDepth(11);
-    this.barText = scene.add.text(BAR.x + BAR.w / 2, BAR.y + BAR.h / 2, '', txt(20)).setOrigin(0.5).setDepth(12);
+    this.barText = scene.add.text(BAR.x + BAR.w / 2, BAR.y + BAR.h / 2, '', txt(22)).setOrigin(0.5).setDepth(12);
     const hk = heartTexture(scene);
     for (let i = 0; i < 8; i++) this.hearts.push(scene.add.image(BAR.x + 12 + i * 27, Y + 43, hk).setScale(1 / RES).setDepth(11));
     this.livesText = scene.add.text(BAR.x + 30, Y + 43, '', txt(20)).setOrigin(0, 0.5).setDepth(11);
-    this.hint = scene.add.text(WORLD_W / 2, 160, 'Basılı tut: büyüt, bırak: at', txt(20, '#fff6a8')).setOrigin(0.5).setDepth(11);
+    this.hint = scene.add.text(12, 36, 'Basılı tut: büyüt, bırak: at', txt(24, '#fff6a8')).setDepth(11);
     for (let i = 0; i < MAX_PLAYERS; i++) {
       const x = SLOT_X + i * SLOT_W + SLOT_W / 2;
       this.slots.push({
-        name: scene.add.text(x, Y + 7, '', txt(20)).setOrigin(0.5, 0).setDepth(11),
-        score: scene.add.text(x, Y + 30, '', txt(24)).setOrigin(0.5, 0).setDepth(11),
+        name: scene.add.text(x, Y + 4, '', txt(23)).setOrigin(0.5, 0).setDepth(11),
+        score: scene.add.text(x, Y + 28, '', txt(28)).setOrigin(0.5, 0).setDepth(11),
       });
     }
   }
@@ -60,22 +59,23 @@ export class Hud {
     const rain = s.mode === 'rain';
     this.bar.clear();
     this.barText.setVisible(rain);
-    this.hint.setVisible(!!god && god.godId === selfId && s.phase === 'playing');
+    // god hint: during my ready phase and the first ~4 s of my turn, then fade out
+    const roundTicks = GOD_BALANCE.roundSec * TICK_RATE;
+    const myTurn = !!god && god.godId === selfId;
+    const into = roundTicks - s.timeLeftTicks; // ticks played this round
+    const hintA = !myTurn ? 0 : s.phase === 'ready' ? 1 : s.phase === 'playing' ? Phaser.Math.Clamp((300 - into) / 60, 0, 1) : 0;
+    this.hint.setVisible(hintA > 0).setAlpha(hintA);
 
     if (god) {
-      const godName = s.players.find((p) => p.id === god.godId)?.name ?? '';
       this.line1.setText(`Raund ${god.round + 1}/${god.order.length}`);
-      this.line2.setText(clip(`Tanrı: ${godName}`, 20));
       this.timeBar(s.timeLeftTicks / (GOD_BALANCE.roundSec * TICK_RATE), s.tick);
       this.manaBar(god.mana, s.tick < god.nextDropTick ? (god.nextDropTick - s.tick) / (GOD_BALANCE.cooldownSec * TICK_RATE) : 0);
     } else if (rain) {
-      this.line1.setText('Yağmur');
-      this.line2.setText(`${s.levelIndex + 1}. dakika`);
-      this.barText.setText(`⏱ ${clock(s.timeLeftTicks)}`);
+      this.line1.setText(`⏱ ${clock(s.timeLeftTicks)}`);
+      this.barText.setText('Yağmur');
     } else {
       const def = getLevel(s.levelIndex);
       this.line1.setText(`Seviye ${s.levelIndex + 1}`);
-      this.line2.setText(clip(def.name, 18));
       this.timeBar(s.timeLeftTicks / (def.timeSeconds * TICK_RATE), s.tick);
     }
 
@@ -89,7 +89,7 @@ export class Hud {
       slot.name.setVisible(!!p);
       slot.score.setVisible(!!p);
       if (!p) return;
-      slot.name.setText(clip(p.name, 10)).setColor(hex(p.color)).setAlpha(p.connected ? 1 : 0.4);
+      slot.name.setText(clip(p.name, 8)).setColor(hex(p.color)).setAlpha(p.connected ? 1 : 0.4);
       slot.score.setText(god ? `★ ${god.roundWins[p.id] ?? 0}${p.id === god.godId ? ' ☁' : ''}` : String(p.score));
     });
   }

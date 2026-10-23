@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { BALL_RADIUS, PLAYER_H, type Ball, type GameState, type Player, type PowerUp } from '../../sim';
 import { FONT, PLAYER_TEX_H, RES, ballTexture, hex, playerTexture, powerTexture } from '../textures';
 import { Pool } from './pool';
+import type { Smoother } from './smooth';
 
 class PlayerView extends Phaser.GameObjects.Container {
   private img: Phaser.GameObjects.Image;
@@ -15,14 +16,14 @@ class PlayerView extends Phaser.GameObjects.Container {
     this.img = scene.add.image(0, 0, playerTexture(scene, p.color)).setOrigin(0.5, 1).setScale(1 / RES);
     const label = scene.add
       .text(0, -PLAYER_TEX_H - 2, p.name, {
-        fontFamily: FONT, fontSize: '22px', fontStyle: '700', color: hex(p.color),
+        fontFamily: FONT, fontSize: '26px', fontStyle: '700', color: hex(p.color),
         stroke: '#0d1020', strokeThickness: 5, resolution: 2,
       })
       .setOrigin(0.5, 1);
     this.bubble = scene.add.graphics();
     this.help = scene.add
-      .text(0, -PLAYER_TEX_H - 30, 'Kurtar!', {
-        fontFamily: FONT, fontSize: '20px', fontStyle: '700', color: '#fff6a8',
+      .text(0, -PLAYER_TEX_H - 34, 'Kurtar!', {
+        fontFamily: FONT, fontSize: '24px', fontStyle: '700', color: '#fff6a8',
         stroke: '#a3204f', strokeThickness: 5, resolution: 2,
       })
       .setOrigin(0.5, 1)
@@ -32,10 +33,10 @@ class PlayerView extends Phaser.GameObjects.Container {
     scene.add.existing(this);
   }
 
-  sync(p: Player, s: GameState, time: number) {
+  sync(p: Player, s: GameState, time: number, at: { x: number; y: number }) {
     this.setVisible(p.connected);
-    const moving = Math.abs(this.x - p.x) > 0.1;
-    this.setPosition(p.x, p.y);
+    const moving = Math.abs(this.x - at.x) > 0.1;
+    this.setPosition(at.x, at.y);
     this.img.setFlipX(p.facing < 0);
     // walk bob, blink while invulnerable, float when trapped
     this.img.y = p.trapped ? -6 + Math.sin(time / 260) * 3 : moving ? -Math.abs(Math.sin(time / 70)) * 3 : 0;
@@ -74,15 +75,20 @@ export class EntityRenderer {
     this.ice = scene.add.graphics().setDepth(4);
   }
 
-  update(s: GameState, time: number): void {
+  /** `smooth` offsets snapshot corrections (clients); my own player is drawn unsmoothed. */
+  update(s: GameState, time: number, smooth: Smoother, selfId: string): void {
     const frozen = s.freezeUntil > s.tick;
     const thawing = frozen && s.freezeUntil - s.tick < 60 && (s.tick >> 3) % 2 === 1;
     this.balls.sync(s.balls, (b) => b.id, (img, b) => {
-      img.setTexture(ballTexture(this.scene, b.size, b.color)).setPosition(b.x, b.y);
+      const at = smooth.at(`b${b.id}`, b.x, b.y);
+      img.setTexture(ballTexture(this.scene, b.size, b.color)).setPosition(at.x, at.y);
     });
     this.ice.clear();
     if (frozen && !thawing) {
-      for (const b of s.balls) this.ice.lineStyle(3, 0xbfefff, 0.85).strokeCircle(b.x, b.y, BALL_RADIUS[b.size] + 3);
+      for (const b of s.balls) {
+        const at = smooth.at(`b${b.id}`, b.x, b.y);
+        this.ice.lineStyle(3, 0xbfefff, 0.85).strokeCircle(at.x, at.y, BALL_RADIUS[b.size] + 3);
+      }
     }
     this.powers.sync(s.powerUps, (p) => p.id, (img, p) => {
       img.setTexture(powerTexture(this.scene, p.kind)).setPosition(p.x, p.y - 6 + Math.sin(time / 200 + p.id) * 1.5);
@@ -90,7 +96,7 @@ export class EntityRenderer {
     });
     const godId = s.mode === 'god' ? s.god?.godId : undefined; // the god rides the cloud instead
     this.players.sync(s.players, (p) => p.id, (v, p) => {
-      v.sync(p, s, time);
+      v.sync(p, s, time, p.id === selfId ? p : smooth.at(`p${p.id}`, p.x, p.y));
       if (p.id === godId) v.setVisible(false);
     });
   }

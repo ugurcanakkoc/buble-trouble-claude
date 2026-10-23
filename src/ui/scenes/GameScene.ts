@@ -13,6 +13,7 @@ import { Fx } from '../render/fx';
 import { ProjectileRenderer } from '../render/projectiles';
 import { GodRenderer } from '../render/god';
 import { FONT, RES, bgTexture } from '../textures';
+import { statsVisible } from '../settings';
 import { clock } from '../hud';
 
 export class GameScene extends Phaser.Scene {
@@ -34,6 +35,9 @@ export class GameScene extends Phaser.Scene {
   private lastBalls: Ball[] = [];
   private lifeLost: 'hit' | 'timeout' = 'hit';
   private endCard: (() => void) | null = null;
+  private statsText!: Phaser.GameObjects.Text;
+  private fps = 60;
+  private statsAt = 0;
 
   constructor() {
     super('Game');
@@ -59,6 +63,11 @@ export class GameScene extends Phaser.Scene {
     });
     this.banner = this.add.text(WORLD_W / 2, WORLD_H / 2 - 20, '', style(64, '#ffd23f')).setOrigin(0.5).setDepth(20);
     this.bannerSub = this.add.text(WORLD_W / 2, WORLD_H / 2 + 36, '', style(28, '#f4f1ff')).setOrigin(0.5).setDepth(20);
+
+    this.statsText = this.add
+      .text(8, 6, '', { fontFamily: FONT, fontSize: '18px', color: '#c9c8f0', stroke: '#0d1020', strokeThickness: 4, resolution: 2 })
+      .setAlpha(0.85)
+      .setDepth(30);
 
     this.controls = createControls();
     this.loop = new GameLoop(session, { createGame, step }, () => {
@@ -87,11 +96,26 @@ export class GameScene extends Phaser.Scene {
     this.handleEvents(events, s);
     this.blocks.update(s.blocks);
     this.shots.update(s.projectiles, s.tick);
-    this.entities.update(s, time);
-    this.godView.update(s, time);
+    this.loop.smooth.decay(Math.min(delta, 250));
+    this.entities.update(s, time, this.loop.smooth, this.session.self.id);
+    this.godView.update(s, time, this.loop.smooth);
     this.hud.update(s, this.session.self.id);
     this.phaseOverlay(s);
+    this.updateStats(time, delta);
     this.lastBalls = s.balls.map((b) => ({ ...b }));
+  }
+
+  /** "60 FPS · güncelleme 135ms (max 410)": smoothed FPS + snapshot gaps on clients. */
+  private updateStats(time: number, delta: number): void {
+    if (delta > 0) this.fps += (1000 / delta - this.fps) * 0.05;
+    const show = statsVisible();
+    this.statsText.setVisible(show);
+    if (!show || time - this.statsAt < 500) return;
+    this.statsAt = time;
+    const net = this.session.isHost ? null : this.loop.snapshotStats();
+    this.statsText.setText(
+      `${Math.round(this.fps)} FPS` + (net ? ` · güncelleme ${Math.round(net.avg)}ms (max ${Math.round(net.max)})` : ''),
+    );
   }
 
   private handleEvents(events: SimEvent[], s: GameState): void {
@@ -222,11 +246,12 @@ export class GameScene extends Phaser.Scene {
       const wins = s.god.roundWins;
       const rows = [...s.players].sort((a, b) => (wins[b.id] ?? 0) - (wins[a.id] ?? 0));
       const best = wins[rows[0]?.id] ?? 0;
-      title = 'Maç Bitti';
+      const winners = rows.filter((p) => (wins[p.id] ?? 0) === best).length;
+      title = winners > 1 ? 'Berabere!' : 'Maç Bitti';
       body = h('table', { class: 'final' },
         ...rows.map((p) =>
-          h('tr', { class: (wins[p.id] ?? 0) === best ? 'win' : '' },
-            h('td', { text: `${(wins[p.id] ?? 0) === best ? '👑 ' : ''}${p.name}`, style: `color:${cssColor(p.color)}` }),
+          h('tr', { class: winners === 1 && (wins[p.id] ?? 0) === best ? 'win' : '' },
+            h('td', { text: `${winners === 1 && (wins[p.id] ?? 0) === best ? '👑 ' : ''}${p.name}`, style: `color:${cssColor(p.color)}` }),
             h('td', { text: `★ ${wins[p.id] ?? 0}` }),
           ),
         ),

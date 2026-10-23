@@ -3,6 +3,7 @@
 import Phaser from 'phaser';
 import { BALL_RADIUS, type BallSize, type GameState } from '../../sim';
 import { GOD_BALANCE } from '../../sim';
+import type { Smoother } from './smooth';
 import { FONT, RES, ballTexture, cloudTexture, hex, playerTexture } from '../textures';
 
 const GHOST_COLORS = [0x4be37a, 0x3fd8ff, 0xffd23f, 0xff4f8b];
@@ -30,7 +31,7 @@ export class GodRenderer {
     this.root = scene.add.container(0, 0, [this.rider, this.cloud, this.label]).setDepth(7).setVisible(false);
   }
 
-  update(s: GameState, time: number): void {
+  update(s: GameState, time: number, smooth: Smoother): void {
     const g = s.god;
     this.root.setVisible(!!g);
     if (!g) {
@@ -40,12 +41,13 @@ export class GodRenderer {
     const storm = g.godId === '';
     // the cloud sits low enough that the rider on top stays on screen
     const y = CLOUD_Y + Math.sin(time / 400) * 3;
-    this.root.setPosition(g.x, y);
+    const x = smooth.at('god', g.x, 0).x; // no offset is ever recorded for my own cloud
+    this.root.setPosition(x, y);
     this.cloud.setTexture(cloudTexture(this.scene, storm));
     this.rider.setVisible(!storm);
     this.label.setVisible(!storm);
     // name beside the cloud, on whichever side has room
-    const right = g.x < 680;
+    const right = x < 680;
     this.label.setOrigin(right ? 0 : 1, 0.5).setX(right ? 78 : -78);
     if (!storm && this.riderId !== g.godId) {
       const p = s.players.find((q) => q.id === g.godId);
@@ -65,7 +67,7 @@ export class GodRenderer {
       const grow = size < 3 ? 1 + (into * (BALL_RADIUS[size + 1] - BALL_RADIUS[size])) / BALL_RADIUS[size] * 0.35 : 1;
       this.ghost
         .setTexture(ballTexture(this.scene, size, GHOST_COLORS[size]))
-        .setPosition(g.x, CLOUD_Y + 26 + BALL_RADIUS[size] * 0.8)
+        .setPosition(x, CLOUD_Y + 26 + BALL_RADIUS[size] * 0.8)
         .setScale(grow / RES)
         .setAlpha(0.45 + Math.sin(time / 90) * 0.15);
     }

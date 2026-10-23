@@ -86,16 +86,20 @@ export class LobbyScene extends Phaser.Scene {
 
     const unmount = mount(
       h('div', { class: 'screen' },
-        h('div', { class: 'card wide' },
-          h('div', { class: 'hint', text: 'Oda kodu' }),
-          h('div', { class: 'code-big', text: session.code }),
-          copy,
-          list,
-          session.isHost
-            ? h('div', { class: 'modes' }, cards.classic, cards.god, cards.rain)
-            : h('div', { class: 'hint', text: 'Mod kurucu tarafından seçilir' }),
-          session.isHost ? start : h('div', { class: 'hint', text: 'Kurucunun başlatması bekleniyor…' }),
-          leave,
+        h('div', { class: 'card wide lobby' },
+          h('div', { class: 'col' },
+            h('div', { class: 'hint', text: 'Oda kodu' }),
+            h('div', { class: 'code-big', text: session.code }),
+            copy,
+            list,
+          ),
+          h('div', { class: 'col' },
+            session.isHost
+              ? h('div', { class: 'modes' }, cards.classic, cards.god, cards.rain)
+              : h('div', { class: 'hint', text: 'Mod kurucu tarafından seçilir' }),
+            session.isHost ? start : h('div', { class: 'hint', text: 'Kurucunun başlatması bekleniyor…' }),
+            leave,
+          ),
         ),
       ),
     );

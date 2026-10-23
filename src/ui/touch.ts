@@ -51,7 +51,14 @@ export function createTouchControls(): { state: TouchState; destroy(): void } {
     h('div', { class: 'tgroup move' }, btn('left', '◀', ''), btn('right', '▶', '')),
     h('div', { class: 'tgroup shoot' }, btn('fire', 'ATEŞ', 'fire')),
   );
-  const applySwap = () => root.classList.toggle('swap', controlsSwapped());
+  // Narrow #app into the space between the gutters (CSS), then make Phaser refit to it.
+  const refit = () => window.dispatchEvent(new Event('resize'));
+  const applySwap = () => {
+    root.classList.toggle('swap', controlsSwapped());
+    document.body.classList.toggle('swapped', controlsSwapped());
+    refit();
+  };
+  document.body.classList.add('controls');
   applySwap();
   window.addEventListener('controls-swap', applySwap);
   const globals = ['pointerup', 'pointercancel', 'blur'] as const;
@@ -63,6 +70,8 @@ export function createTouchControls(): { state: TouchState; destroy(): void } {
       window.removeEventListener('controls-swap', applySwap);
       for (const ev of globals) window.removeEventListener(ev, release);
       root.remove();
+      document.body.classList.remove('controls', 'swapped');
+      refit();
     },
   };
 }

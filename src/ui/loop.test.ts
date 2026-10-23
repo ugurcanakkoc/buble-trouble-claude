@@ -223,6 +223,37 @@ describe('GameLoop client', () => {
     expect(ev).toEqual([{ type: 'pop', x: 10, y: 20, size: 2, playerId: '', points: 0, combo: 1 }]);
   });
 
+  it('smooths snapshot jumps of balls and other players, never my own player', () => {
+    const { s, emit } = fakeSession(false);
+    const loop = new GameLoop(s, fakeSim().sim);
+    emit('start', payload);
+    loop.state!.balls.push({ id: 1, x: 100, y: 100, vx: 0, vy: 0, size: 1, color: 1 });
+    const snap = mkState(payload.players);
+    snap.balls.push({ id: 1, x: 110, y: 100, vx: 0, vy: 0, size: 1, color: 1 });
+    snap.players[0].x += 20; // host player (other)
+    emit('snapshot', snap);
+    expect(loop.smooth.at('b1', 110, 100)).toEqual({ x: 100, y: 100 });
+    expect(loop.smooth.at('ph', snap.players[0].x, 480).x).toBe(snap.players[0].x - 20);
+    expect(loop.smooth.at('pc', 5, 5)).toEqual({ x: 5, y: 5 });
+  });
+
+  it('reports snapshot interval avg/max over the last 2 s', () => {
+    const { s, emit } = fakeSession(false);
+    let t = 0;
+    const loop = new GameLoop(s, fakeSim().sim, () => {}, () => t);
+    emit('start', payload);
+    expect(loop.snapshotStats()).toBeNull();
+    for (const gap of [0, 130, 140, 400]) {
+      t += gap;
+      emit('snapshot', mkState(payload.players));
+    }
+    expect(loop.snapshotStats()).toEqual({ avg: 670 / 3, max: 400 });
+    t += 3000; // old samples drop out, and a stall shows up as max
+    emit('snapshot', mkState(payload.players));
+    t += 500;
+    expect(loop.snapshotStats()!.max).toBe(3000);
+  });
+
   it('calls onHostLeft and unsubscribes on dispose', () => {
     const { s, emit } = fakeSession(false);
     const left = vi.fn();

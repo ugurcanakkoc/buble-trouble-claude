@@ -2,6 +2,7 @@
 // input, and reads `state` + the returned events. Sim functions are injected so tests can stub them.
 import { EMPTY_INPUT, type GameMode, type GameState, type InputState, type PlayerId, type PlayerInfo, type SimEvent } from '../sim';
 import type { RoomSession, StartPayload } from '../net';
+import { Smoother } from './render/smooth';
 
 export const STEP_MS = 1000 / 60;
 export const MAX_STEPS_PER_FRAME = 5;
@@ -60,11 +61,15 @@ export class GameLoop {
   private remote: Record<PlayerId, InputState> = {};
   private pending: SimEvent[] = []; // events synthesized from snapshots, drained by update()
   private offs: (() => void)[] = [];
+  /** Client-only render smoothing of snapshot corrections (host never corrects, so it stays 0). */
+  readonly smooth = new Smoother();
+  private snapTimes: number[] = []; // arrival times (ms) of recent snapshots
 
   constructor(
     private session: RoomSession,
     private sim: SimFns,
     onHostLeft: () => void = () => {},
+    private now: () => number = () => performance.now(),
   ) {
     const s = session;
     this.offs.push(s.onStart((p) => this.start(p)));
@@ -85,6 +90,7 @@ export class GameLoop {
     } else {
       this.offs.push(
         s.onSnapshot((snap, inputs) => {
+          this.noteSnapshot(this.now());
           this.remote = inputs ?? {};
           this.applySnapshot(snap);
         }),
@@ -172,7 +178,43 @@ export class GameLoop {
     if (snap.phase === 'playing') for (let i = 0; i < SNAPSHOT_LEAD_TICKS; i++) this.sim.step(snap, this.inputs(snap));
     if (keepX !== null) setOwnX(snap, this.selfId, keepX, true);
     if (keepCloudX !== null && snap.god) snap.god.x = keepCloudX;
+    this.recordCorrections(prev, snap);
     this.state = snap;
+  }
+
+  /** Turn snapshot jumps of balls / other players / someone else's cloud into smoothing offsets. */
+  private recordCorrections(prev: GameState | null, snap: GameState): void {
+    if (!prev || prev.levelIndex !== snap.levelIndex || (snap.phase === 'ready' && prev.phase !== 'ready')) {
+      this.smooth.clear();
+      return;
+    }
+    const balls = new Map(prev.balls.map((b) => [b.id, b]));
+    for (const b of snap.balls) {
+      const o = balls.get(b.id);
+      if (o) this.smooth.correct(`b${b.id}`, o.x, o.y, b.x, b.y);
+    }
+    const players = new Map(prev.players.map((p) => [p.id, p]));
+    for (const p of snap.players) {
+      const o = players.get(p.id);
+      if (o && p.id !== this.selfId) this.smooth.correct(`p${p.id}`, o.x, o.y, p.x, p.y);
+    }
+    if (prev.god && snap.god && snap.god.godId !== this.selfId) this.smooth.correct('god', prev.god.x, 0, snap.god.x, 0);
+  }
+
+  private noteSnapshot(t: number): void {
+    this.snapTimes.push(t);
+    while (this.snapTimes.length > 2 && this.snapTimes[0] < t - 2000) this.snapTimes.shift();
+  }
+
+  /** Gaps between snapshots received in the last ~2 s (client only), or null if too few. */
+  snapshotStats(): { avg: number; max: number } | null {
+    const t = this.snapTimes;
+    if (t.length < 2) return null;
+    let max = 0;
+    for (let i = 1; i < t.length; i++) max = Math.max(max, t[i] - t[i - 1]);
+    // include the time since the last one, so a stall shows up while it is happening
+    max = Math.max(max, this.now() - t[t.length - 1]);
+    return { avg: (t[t.length - 1] - t[0]) / (t.length - 1), max };
   }
 
   dispose(): void {
