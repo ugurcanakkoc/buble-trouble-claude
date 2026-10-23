@@ -19,6 +19,8 @@ import { Fx } from '../render/fx';
 import { ProjectileRenderer } from '../render/projectiles';
 import { GodRenderer } from '../render/god';
 import { FONT, RES, bgTexture } from '../textures';
+import { squeak } from '../voice';
+import { HELP_TICKS } from '../../sim/fighters';
 import { clock } from '../hud';
 
 export class GameScene extends Phaser.Scene {
@@ -28,6 +30,7 @@ export class GameScene extends Phaser.Scene {
   private controls!: ReturnType<typeof createControls>;
   private bg!: Phaser.GameObjects.Image;
   private bgSides: Phaser.GameObjects.Image[] = [];
+  private lastHelp = new Map<string, number>();
   private blocks!: BlockRenderer;
   private shots!: ProjectileRenderer;
   private entities!: EntityRenderer;
@@ -54,6 +57,7 @@ export class GameScene extends Phaser.Scene {
     this.session = session;
     this.lastPhase = null;
     this.lastLevel = -1;
+    this.lastHelp.clear();
     this.lastBalls = [];
     this.endCard = null;
     this.leader = '';
@@ -138,6 +142,13 @@ export class GameScene extends Phaser.Scene {
       for (const m of this.bgSides) m.setTexture(this.bg.texture.key);
     }
     this.handleEvents(events, s);
+    const me = s.players.find((p) => p.id === this.session.self.id);
+    this.controls.setFireLabel(me?.trapped ? 'YARDIM' : 'ATEŞ');
+    for (const p of s.players) {
+      const prev = this.lastHelp.get(p.id) ?? 0;
+      if (p.helpUntil > s.tick && p.helpUntil > prev + HELP_TICKS / 2) squeak('Yardım et! Yardım et!');
+      this.lastHelp.set(p.id, p.helpUntil);
+    }
     this.blocks.update(s.blocks);
     this.shots.update(s.projectiles, s.tick);
     this.smooth.decay(Math.min(delta, 250));

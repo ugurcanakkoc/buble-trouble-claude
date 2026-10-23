@@ -9,6 +9,7 @@ class PlayerView extends Phaser.GameObjects.Container {
   private shield: Phaser.GameObjects.Graphics;
   private bubble: Phaser.GameObjects.Graphics;
   private help: Phaser.GameObjects.Text;
+  private shouting = false;
 
   constructor(scene: Phaser.Scene, p: Player) {
     super(scene);
@@ -43,6 +44,12 @@ class PlayerView extends Phaser.GameObjects.Container {
     this.img.setAlpha(p.invulnUntil > s.tick && (s.tick >> 2) % 2 ? 0.35 : 1);
     this.bubble.clear();
     this.help.setVisible(p.trapped);
+    const shouting = p.trapped && s.tick < p.helpUntil;
+    if (shouting !== this.shouting) {
+      this.shouting = shouting;
+      if (shouting) this.help.setText('Yardım et!').setColor('#1b1030').setStroke('#ffffff', 0).setBackgroundColor('#ffffff').setPadding(10, 6, 10, 6);
+      else this.help.setText('Kurtar!').setColor('#fff6a8').setStroke('#a3204f', 5).setBackgroundColor('rgba(0,0,0,0)').setPadding(0);
+    }
     if (p.trapped) {
       const cy = -PLAYER_H / 2 - 6 + Math.sin(time / 260) * 3;
       const rx = PLAYER_H * 0.62 + Math.sin(time / 170) * 3;

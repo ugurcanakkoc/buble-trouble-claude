@@ -377,3 +377,22 @@ describe('determinism', () => {
     expect(JSON.stringify(b)).toBe(JSON.stringify(a));
   });
 });
+
+describe('help shout', () => {
+  it('a trapped player shouts on a fresh fire press, once per bubble; free players just shoot', () => {
+    const s = arena(2);
+    ball(s, 3, 100, 100); // frozen far above: keeps the level running
+    s.freezeUntil = 1e9;
+    s.players[0].trapped = true;
+    s.players[1].x = s.players[0].x + 300; // far away: no revive
+    let ev = run(s, 30, () => ({ p0: FIRE })); // held
+    expect(count(ev, 'help')).toBe(1);
+    expect(count(ev, 'shoot')).toBe(0);
+    expect(s.players[0].helpUntil).toBeGreaterThan(s.tick);
+    ev = run(s, 120, (t) => ({ p0: t % 2 ? FIRE : EMPTY_INPUT })); // mashing: limited by the bubble time
+    expect(count(ev, 'help')).toBeGreaterThanOrEqual(1);
+    expect(count(ev, 'help')).toBeLessThanOrEqual(2);
+    ev = run(s, 5, () => ({ p1: FIRE }));
+    expect(count(ev, 'help')).toBe(0);
+  });
+});

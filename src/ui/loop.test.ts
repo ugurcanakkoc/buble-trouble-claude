@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { GameSim } from '../games/types';
 import type { PlayerId, PlayerInfo } from '../sim';
 import type { StartPayload } from '../net';
-import { GameLoop, SNAPSHOT_LEAD_TICKS, STEP_MS, startPayload } from './loop';
+import { GameLoop, SNAPSHOT_LEAD_TICKS, STEP_MS, keepPresses, startPayload } from './loop';
 import { fakeSession } from './testSession';
 
 // Minimal game: players have x/y, `go` moves +1 x per tick.
@@ -245,5 +245,14 @@ describe('startPayload', () => {
     const p = startPayload(s, 'god', 2);
     expect(p).toMatchObject({ game: 'bubble', mode: 'god', levelIndex: 2, players: [{ id: 'h', name: 'h', color: 0xff0000 }] });
     expect('levelIndex' in startPayload(s, 'pvp')).toBe(false);
+  });
+});
+
+describe('keepPresses', () => {
+  it('keeps a press that no step has seen yet, takes other fields from the newer input', () => {
+    const a = { left: false, right: true, fire: true, seq: 3 };
+    const b = { left: true, right: false, fire: false, seq: 4 };
+    expect(keepPresses(a, b)).toEqual({ left: true, right: true, fire: true, seq: 4 });
+    expect(keepPresses(undefined as unknown as typeof b, b)).toEqual(b);
   });
 });

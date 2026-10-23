@@ -43,6 +43,17 @@ export function startPayload(session: RoomSession, mode: string, levelIndex?: nu
   };
 }
 
+/**
+ * Merge a newer input into one no sim step has seen yet: booleans that were pressed stay pressed
+ * (a fire tap whose press+release land in the same host frame still fires); other fields take the new value.
+ */
+export function keepPresses<I>(older: I, newer: I): I {
+  if (!older || typeof older !== 'object') return newer;
+  const out = { ...newer } as Record<string, unknown>;
+  for (const [k, v] of Object.entries(older as Record<string, unknown>)) if (v === true) out[k] = true;
+  return out as I;
+}
+
 export class GameLoop<S, I, E = unknown> {
   state: S | null = null;
   private acc = 0;
@@ -51,6 +62,8 @@ export class GameLoop<S, I, E = unknown> {
   private local: I;
   private lastSent: string | null = null;
   private remote: Record<PlayerId, I> = {};
+  private remoteRaw: Record<PlayerId, I> = {};
+  private unused = new Set<PlayerId>(); // inputs not yet seen by any sim step
   private pending: E[] = [];
   private offs: (() => void)[] = [];
   private snapTimes: number[] = []; // arrival times (ms) of recent snapshots
@@ -70,7 +83,9 @@ export class GameLoop<S, I, E = unknown> {
     if (s.isHost) {
       this.offs.push(
         s.onInput((id, input, pos) => {
-          this.remote[id] = input as I;
+          this.remote[id] = this.unused.has(id) ? keepPresses(this.remote[id], input as I) : (input as I);
+          this.remoteRaw[id] = input as I;
+          this.unused.add(id);
           if (pos && this.state) this.sim.setOwnPos?.(this.state, id, pos);
         }),
         s.onPlayersChange((list) => {
@@ -129,6 +144,8 @@ export class GameLoop<S, I, E = unknown> {
       this.acc -= this.stepMs;
       n++;
       events.push(...this.sim.step(state, this.inputs()));
+      for (const id of this.unused) this.remote[id] = this.remoteRaw[id];
+      this.unused.clear();
       this.steps++;
       if (this.session.isHost && this.steps % SNAPSHOT_EVERY === 0) this.session.sendSnapshot(state, this.inputs());
     }

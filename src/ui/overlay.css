@@ -148,7 +148,7 @@ canvas { display: block; }
 .touch .dpad .u { grid-area: 1 / 2; } .touch .dpad .l { grid-area: 2 / 1; }
 .touch .dpad .r { grid-area: 2 / 3; } .touch .dpad .d { grid-area: 3 / 2; }
 .touch .tbtn {
-  pointer-events: auto; width: clamp(76px, 22vh, 110px); height: clamp(120px, 42vh, 200px); border-radius: 999px;
+  pointer-events: auto; width: clamp(74px, 21vh, 104px); height: clamp(84px, 25vh, 122px); border-radius: 30px;
   background: rgba(255, 255, 255, .1); border: 3px solid rgba(255, 255, 255, .35); box-sizing: border-box;
   color: rgba(255, 255, 255, .9); font: 700 34px var(--font); display: flex; align-items: center; justify-content: center;
   text-align: center; line-height: 1.05; overflow: hidden; text-shadow: 0 2px 4px rgba(0, 0, 0, .6);
@@ -157,7 +157,7 @@ canvas { display: block; }
 .touch .tbtn.on { background: rgba(255, 255, 255, .34); transform: scale(.94); }
 .touch .tbtn.small { width: clamp(60px, 18vh, 84px); height: clamp(60px, 18vh, 84px); font-size: 18px; }
 .touch .tbtn.big {
-  width: clamp(120px, 38vh, 180px); height: clamp(120px, 38vh, 180px); font-size: 26px;
+  width: clamp(98px, 29vh, 138px); height: clamp(98px, 29vh, 138px); font-size: 23px;
   background: rgba(255, 79, 139, .3); border-color: rgba(255, 160, 190, .75);
 }
 .touch .tbtn.big.on { background: rgba(255, 79, 139, .7); }

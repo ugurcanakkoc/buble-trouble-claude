@@ -11,12 +11,14 @@ const KEYS: Record<string, Action> = {
   Space: 'fire', KeyZ: 'fire', ArrowUp: 'fire',
 };
 
-export function createControls(): { read(): InputState; destroy(): void } {
+export function createControls(): { read(): InputState; setFireLabel(text: string): void; destroy(): void } {
   const down = new Set<string>();
+  const tappedAt = new Map<string, number>(); // a key tap shorter than a sim step still counts (50 ms)
   const onDown = (e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement || !(e.code in KEYS)) return;
     e.preventDefault();
     down.add(e.code);
+    tappedAt.set(e.code, performance.now());
   };
   const onUp = (e: KeyboardEvent) => down.delete(e.code);
   const clear = () => down.clear();
@@ -30,9 +32,17 @@ export function createControls(): { read(): InputState; destroy(): void } {
       })
     : null;
 
+  let fireLabel = 'ATEŞ';
   return {
+    setFireLabel(text) {
+      if (text === fireLabel) return;
+      fireLabel = text;
+      touch?.setLabel('fire', text);
+    },
     read() {
       const s: InputState = { ...EMPTY_INPUT };
+      const now = performance.now();
+      for (const [code, t] of tappedAt) if (now - t < 50) s[KEYS[code]] = true;
       for (const code of down) s[KEYS[code]] = true;
       if (touch) for (const k of ['left', 'right', 'fire'] as const) s[k] ||= touch.isDown(k);
       return s;

@@ -22,21 +22,24 @@ export interface TouchControls {
   destroy(): void;
 }
 
+/** A tap shorter than this still reads as held for this long, so the sim (60 Hz) always sees it. */
+const TAP_MS = 50;
 const DPAD: [string, string, string][] = [['up', '▲', 'u'], ['left', '◀', 'l'], ['right', '▶', 'r'], ['down', '▼', 'd']];
 const DEFAULT_SHAPE = { normal: 'pill', big: 'circle', small: 'square' } as const;
 
 export function mountTouchControls(spec: { left: TouchGroup; right: TouchGroup }): TouchControls {
-  const buttons = new Map<string, { el: HTMLElement; active: Set<number>; press: Set<() => void>; enabled: boolean }>();
+  const buttons = new Map<string, { el: HTMLElement; active: Set<number>; press: Set<() => void>; enabled: boolean; tappedAt: number }>();
 
   const btn = (b: TouchButtonSpec, extra = '') => {
     const size = b.size ?? 'normal';
     const el = h('div', { class: `tbtn ${size} ${b.shape ?? DEFAULT_SHAPE[size]} ${extra}`, text: b.label });
-    const st = { el, active: new Set<number>(), press: new Set<() => void>(), enabled: true };
+    const st = { el, active: new Set<number>(), press: new Set<() => void>(), enabled: true, tappedAt: -1e9 };
     el.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       if (!st.enabled) return;
       const was = st.active.size > 0;
       st.active.add(e.pointerId);
+      st.tappedAt = performance.now();
       sync(st);
       if (!was) st.press.forEach((cb) => cb());
       try {
@@ -87,7 +90,11 @@ export function mountTouchControls(spec: { left: TouchGroup; right: TouchGroup }
 
   const get = (id: string) => buttons.get(id);
   return {
-    isDown: (id) => (get(id)?.active.size ?? 0) > 0,
+    isDown(id) {
+      const st = get(id);
+      if (!st) return false;
+      return st.active.size > 0 || performance.now() - st.tappedAt < TAP_MS;
+    },
     onPress(id, cb) {
       const st = get(id);
       st?.press.add(cb);

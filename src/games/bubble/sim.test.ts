@@ -16,7 +16,7 @@ function mkState(players: PlayerInfo[]): GameState {
     freezeUntil: 0, nextId: 10, balls: [], projectiles: [], powerUps: [], blocks: [], mode: 'classic', god: null, timeBonus: 0,
     players: players.map((p, i) => ({
       ...p, x: 100 + i * 100, y: 480, facing: 1, weapon: 'harpoon', shield: false, score: 0,
-      invulnUntil: 0, connected: true, fireHeld: false, nextFireTick: 0, trapped: false, combo: 1, comboUntil: 0, stats: newStats(),
+      invulnUntil: 0, connected: true, fireHeld: false, nextFireTick: 0, trapped: false, helpUntil: 0, combo: 1, comboUntil: 0, stats: newStats(),
     })),
   };
 }

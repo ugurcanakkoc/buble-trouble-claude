@@ -8,6 +8,7 @@ import { fire, updateProjectiles } from './weapons';
 
 const SHIELD_INVULN_TICKS = TICK_RATE;
 const REVIVE_INVULN_TICKS = Math.round(1.5 * TICK_RATE);
+export const HELP_TICKS = Math.round(1.5 * TICK_RATE); // speech bubble time, also the shout cooldown
 const HITBOX_INSET = 4; // forgiving player hitbox
 
 /** Clear per-level/round player state (scores, shields kept). */
@@ -17,6 +18,7 @@ export function resetFighters(players: Player[]): void {
     p.invulnUntil = 0;
     p.nextFireTick = 0;
     p.trapped = false;
+    p.helpUntil = 0;
     p.combo = 0;
     p.comboUntil = 0;
   }
@@ -37,12 +39,19 @@ export function worldTick(s: GameState, fighters: Player[], input: (p: Player) =
     movePlayer(p, input(p));
     fire(s, p, input(p), events);
   }
+  // A trapped player's fire button shouts for help (fresh press, once per bubble).
+  for (const p of fighters) {
+    if (!p.trapped || !input(p).fire || p.fireHeld || s.tick < p.helpUntil) continue;
+    p.helpUntil = s.tick + HELP_TICKS;
+    events.push({ type: 'help', playerId: p.id });
+  }
   // A free teammate touching a trapped player frees them.
   for (const t of fighters) {
     if (!t.trapped) continue;
     const by = free.find((p) => Math.abs(p.x - t.x) < PLAYER_W);
     if (!by) continue;
     t.trapped = false;
+    t.helpUntil = 0;
     t.invulnUntil = s.tick + REVIVE_INVULN_TICKS;
     by.stats.revives++;
     events.push({ type: 'revive', playerId: t.id, by: by.id });

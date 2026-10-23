@@ -19,7 +19,7 @@ export function createGame(seed: number, players: PlayerInfo[], levelIndex = 0, 
     freezeUntil: 0, nextId: 1, balls: [], projectiles: [], powerUps: [], blocks: [], mode, god: null, timeBonus: 0,
     players: players.map((p): Player => ({
       id: p.id, name: p.name, color: p.color, x: 0, y: 0, facing: 1, weapon: 'harpoon', shield: false, score: 0,
-      invulnUntil: 0, connected: true, fireHeld: false, nextFireTick: 0, trapped: false, combo: 0, comboUntil: 0, stats: newStats(),
+      invulnUntil: 0, connected: true, fireHeld: false, nextFireTick: 0, trapped: false, helpUntil: 0, combo: 0, comboUntil: 0, stats: newStats(),
     })),
   };
   if (mode === 'classic') loadLevel(s, levelIndex, []);

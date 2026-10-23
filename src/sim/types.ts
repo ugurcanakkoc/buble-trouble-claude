@@ -85,7 +85,8 @@ export interface Player {
   connected: boolean;
   fireHeld: boolean; // fire was held last tick (a fresh press fires a harpoon immediately)
   nextFireTick: number; // gun cooldown / harpoon hold-to-refire delay
-  trapped: boolean; // hit by a ball: stuck in a bubble until a teammate touches them
+  trapped: boolean;
+  helpUntil: number; // tick until the trapped player's "Yardım et!" shout is shown (0 = none) // hit by a ball: stuck in a bubble until a teammate touches them
   combo: number; // current pop chain multiplier, 1..5
   comboUntil: number; // tick when the chain expires
   stats: PlayerStats;
@@ -149,6 +150,7 @@ export type SimEvent =
   | { type: 'powerup'; kind: PowerUpKind; playerId: PlayerId }
   | { type: 'shieldBreak'; playerId: PlayerId }
   | { type: 'trapped'; playerId: PlayerId } // player caught in a bubble
+  | { type: 'help'; playerId: PlayerId } // trapped player pressed fire: shout for help
   | { type: 'revive'; playerId: PlayerId; by: PlayerId }
   | { type: 'hit'; playerId: PlayerId } // whole team trapped -> life lost (playerId = last trapped)
   | { type: 'timeout' } // timer ran out -> life lost
