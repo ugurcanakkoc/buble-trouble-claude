@@ -1,0 +1,57 @@
+/* Mutfak Kaosu DOM overlays (shop, recipe book, end table). Builds on ui/overlay.css (.screen/.card/.btn). */
+.mk-book { right: 178px; font-size: 22px; color: var(--text); }
+@media (max-height: 430px) { .mk-book { right: 138px; font-size: 17px; } }
+
+.mk-modal { background: rgba(13, 16, 32, .78); backdrop-filter: blur(2px); z-index: 40; }
+.mk-modal .card { width: min(780px, 100%); padding: 14px 16px 16px; gap: 10px; }
+.mk-modal .title { font-size: clamp(24px, 6vh, 36px); }
+.mk-cols { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 12px; text-align: left; }
+.mk-box { background: #0f1330; border-radius: 14px; padding: 8px 12px; font-size: 16px; }
+.mk-box h3 { margin: 0 0 4px; font-size: 17px; color: var(--yellow); }
+.mk-sum { display: grid; grid-template-columns: auto auto; gap: 2px 10px; }
+.mk-sum span:nth-child(even) { text-align: right; font-weight: 700; }
+.mk-stars { font-size: 26px; color: var(--yellow); letter-spacing: 2px; }
+.mk-stars .off { color: #555a80; }
+.mk-ups { display: flex; flex-direction: column; gap: 6px; }
+.mk-up {
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 8px; text-align: left;
+  background: #1c2350; border: 2px solid var(--panel-edge); border-radius: 12px; padding: 6px 10px;
+  font: 600 16px var(--font); color: var(--text); cursor: pointer;
+}
+.mk-up small { grid-column: 1; color: var(--muted); font-size: 13px; font-weight: 500; }
+.mk-up b { grid-row: 1 / span 2; grid-column: 2; color: var(--yellow); font-size: 17px; }
+.mk-up.owned { border-color: var(--green); cursor: default; }
+.mk-up.owned b { color: var(--green); }
+.mk-up:disabled:not(.owned) { opacity: .45; cursor: default; }
+.mk-foot { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.mk-foot .btn { min-width: 180px; }
+.mk-recipes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; text-align: left; }
+.mk-recipes p { margin: 0; font-size: 15px; line-height: 1.3; }
+.mk-end { margin: 4px auto 10px; border-collapse: collapse; font-size: 15px; }
+.mk-end td, .mk-end th { padding: 3px 8px; text-align: center; }
+.mk-end th { color: var(--muted); font-weight: 600; }
+@media (max-height: 430px) {
+  .mk-modal .card { padding: 10px 12px 12px; gap: 6px; border-radius: 18px; }
+  .mk-box { font-size: 14px; padding: 6px 10px; }
+  .mk-up { font-size: 14px; padding: 4px 8px; }
+  .mk-up small { font-size: 12px; }
+  .mk-recipes p { font-size: 13px; }
+  .mk-foot .btn { min-height: 44px; font-size: 18px; }
+}
+.mk-end .mk-stars { font-size: 16px; letter-spacing: 0; }
+/* B (KULLAN/DOĞRA/SİPARİŞ…) sits above A instead of beside it, so it no longer covers the bottom-right tables.
+   Filled, nearly A-sized, with a hold-progress fill (--hold 0..1, set by the scene). Hidden on the scooter. */
+.touch.mk-touch .tgroup:not(.joy) { flex-direction: column; align-items: center; gap: 10px; }
+.touch.mk-touch .tbtn.normal {
+  width: clamp(84px, 25vh, 118px); height: clamp(84px, 25vh, 118px); border-radius: 50%;
+  font-size: clamp(15px, 4.6vh, 22px); border-color: rgba(166, 255, 138, .85);
+  background: conic-gradient(rgba(255, 210, 63, .8) calc(var(--hold, 0) * 1turn), rgba(75, 227, 122, .32) 0);
+}
+.touch.mk-touch .tbtn.normal.on { filter: brightness(1.35); }
+.touch.mk-touch.mk-courier .tbtn.normal { display: none; }
+@media (max-height: 430px) {
+  .mk-modal .title { font-size: 22px; }
+  .mk-recipes { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .mk-recipes p { font-size: 12px; line-height: 1.25; }
+  .mk-recipes .mk-box h3 { font-size: 14px; margin: 0 0 2px; }
+}

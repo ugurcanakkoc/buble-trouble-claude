@@ -1,0 +1,84 @@
+/* Paramedik: manual ("112 iç portal") + phase cards. Uses the overlay.css variables. */
+.pm-manual {
+  position: fixed; inset: 0; z-index: 15; display: flex; flex-direction: column; gap: 8px;
+  padding: 8px max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left)); box-sizing: border-box;
+  background: #eef1f7; color: #1b2140; font-family: var(--font);
+}
+.pm-manual[hidden] { display: none; }
+.pm-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-right: 160px; }
+.pm-brand { font-weight: 700; font-size: 18px; color: #c8102e; }
+.pm-info { font-size: 15px; color: #4a5378; }
+.pm-close { margin-left: auto; min-height: 40px; font-size: 16px; padding: 4px 14px; }
+.pm-disc { font-size: 12px; color: #6b5a00; background: #fff4c2; border-radius: 8px; padding: 4px 8px; cursor: pointer; flex: none; }
+.pm-card .pm-disc { color: #ffe9a0; background: rgba(255, 210, 63, .12); }
+.pm-tabs { display: flex; gap: 6px; overflow-x: auto; flex: none; }
+.pm-tab {
+  flex: none; font: 600 16px var(--font); padding: 8px 14px; border-radius: 10px 10px 0 0; border: 2px solid #c5cbe0;
+  background: #fff; color: #1b2140; cursor: pointer; min-height: 40px;
+}
+.pm-tab.on { background: #1b2140; color: #fff; border-color: #1b2140; }
+.pm-tab:disabled { opacity: .45; cursor: default; }
+.pm-tab small { font-size: 12px; }
+.pm-search { font: 16px var(--font); padding: 6px 10px; border-radius: 8px; border: 2px solid #c5cbe0; flex: none; }
+.pm-feed { font-size: 14px; font-weight: 600; min-height: 18px; background: #1b2140; border-radius: 8px; padding: 2px 8px; flex: none; }
+.pm-feed:empty { display: none; }
+.pm-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.pm-sec { background: #fff; border-radius: 12px; padding: 8px 12px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+.pm-sec h3 { margin: 0 0 6px; font-size: 17px; color: #c8102e; }
+.pm-sec p { margin: 4px 0; font-size: 16px; }
+.pm-note { color: #4a5378; font-style: italic; }
+.pm-scroll { overflow-x: auto; }
+.pm-table { border-collapse: collapse; font-size: 15px; min-width: 100%; }
+.pm-table th, .pm-table td { border: 1px solid #d9deef; padding: 4px 8px; text-align: left; vertical-align: top; }
+.pm-table th { background: #e3e8f6; }
+.pm-flow { margin: 0; padding-left: 22px; font-size: 16px; line-height: 1.9; }
+.pm-tri { padding: 1px 8px; border-radius: 6px; color: #1b2140; }
+.pm-sw { display: inline-block; width: 14px; height: 14px; border-radius: 50%; vertical-align: -2px; border: 1px solid rgba(0, 0, 0, .3); }
+.pm-hide { display: none !important; }
+.pm-onay { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex: none; }
+.pm-onay[hidden] { display: none; }
+.pm-hint { font-size: 13px; color: #4a5378; }
+.pm-onay-t { font-size: 15px; color: #1b2140; }
+.pm-chips { display: flex; gap: 6px; overflow-x: auto; flex: 1; min-width: 0; -webkit-overflow-scrolling: touch; }
+.pm-chip {
+  flex: none; font: 700 16px var(--font); min-height: 44px; padding: 4px 14px; border-radius: 22px; cursor: pointer;
+  border: 2px solid #1b2140; background: #fff; color: #1b2140;
+}
+.pm-chip.back { background: #1b2140; color: #fff; }
+.pm-chip:active { background: #3fd8ff; }
+.pm-bar { display: flex; gap: 8px; align-items: flex-end; flex: none; min-width: 0; }
+.pm-bar .pm-tabs { flex: 0 1 auto; min-width: 0; }
+.pm-bar .pm-search { flex: 1 1 120px; min-width: 100px; min-height: 40px; box-sizing: border-box; }
+.pm-status { font-size: 15px; font-weight: 700; color: #1b2140; border-radius: 12px; padding: 2px 10px; }
+.pm-status[hidden] { display: none; }
+.pm-goal { font-weight: 700; color: #ffd23f; }
+
+.pm-phase { z-index: 16; }
+.pm-card { width: min(520px, 100%); gap: 10px; }
+.pm-card .players li { padding: 4px 10px; }
+.pm-log { text-align: left; margin: 0; padding-left: 18px; max-height: 30vh; overflow-y: auto; font-size: 15px; }
+.pm-log .r-dogru span { color: var(--green); }
+.pm-log .r-zararli span, .pm-log .r-yanlis span { color: var(--danger); }
+.pm-log .r-gereksiz span { color: var(--yellow); }
+.pm-log .r-info { color: var(--muted); }
+@media (max-height: 430px) {
+  /* phones in landscape: the manual body gets most of the height */
+  .pm-manual { gap: 4px; padding-top: 4px; padding-bottom: 4px; }
+  .pm-brand { display: none; }
+  .pm-head { gap: 8px; flex-wrap: nowrap; padding-right: 150px; }
+  .pm-info { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+  .pm-status { font-size: 13px; flex: none; }
+  .pm-close { min-height: 36px; }
+  .pm-manual .pm-disc:not(.open) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 1px 8px; }
+  .pm-feed { font-size: 13px; min-height: 0; }
+  .pm-tab { padding: 6px 10px; font-size: 15px; }
+  .pm-hint { font-size: 12px; max-width: 170px; line-height: 1.2; }
+  .pm-chip { min-height: 40px; font-size: 15px; padding: 2px 12px; }
+  .pm-sec { padding: 6px 10px; margin-bottom: 6px; }
+  .pm-card { padding: 10px 16px; gap: 6px; max-height: calc(100vh - 56px); overflow-y: auto; box-sizing: border-box; }
+  .pm-card .players { display: none; }
+  .pm-card .hint { font-size: 14px; }
+  .pm-card .title.small { font-size: 22px; }
+  .pm-card .endline, .pm-goal { font-size: 15px; }
+  .pm-card .btn.big { min-height: 44px; font-size: 18px; }
+}
