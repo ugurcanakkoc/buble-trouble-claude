@@ -97,7 +97,8 @@ export function dayTarget(s: MutfakState, day = s.day): number {
   return Math.round(base * B.playerScale[Math.min(humansCount(s), 4) - 1]);
 }
 const humansCount = (s: MutfakState) => Math.max(1, s.players.length);
-export const rentOf = (day: number) => B.rentBase + B.rentPerDay * day;
+export const rentOf = (day: number) => (day <= B.graceDays ? 0 : B.rentBase + B.rentPerDay * day);
+const repFloor = (s: MutfakState) => (s.day <= B.graceDays ? B.graceRepFloor : 0);
 export const upgradePrice = (s: MutfakState, id: UpgradeId) =>
   id === 'botKurye' && s.players.length === 1 ? 0 : UPGRADES.find((u) => u.id === id)!.price;
 export function starsFor(s: MutfakState, revenue: number, day = s.day): number {
@@ -399,7 +400,7 @@ function serveDine(s: MutfakState, p: MPlayer, st: Station, o: Order, ev: Mutfak
 }
 
 function wrongDish(s: MutfakState, p: MPlayer, o: Order, ev: MutfakEvent[]): void {
-  s.rep = Math.max(0, s.rep - B.repFail);
+  s.rep = Math.max(repFloor(s), s.rep - B.repFail);
   p.hand = p.hand!.k === 'tabak' ? { k: 'kirli' } : null; // iade: plate comes back dirty, tea is spilled
   ev.push({ type: 'wrong', order: o.id });
 }
@@ -623,7 +624,7 @@ function tickOrders(s: MutfakState, ev: MutfakEvent[]): void {
       t.item = t.item?.k === 'tabak' ? { k: 'kirli' } : null;
       s.orders = s.orders.filter((q) => q !== o);
     } else if ((o.st === 'queue' || o.st === 'seated') && s.tick - o.born > o.pat) {
-      s.rep = Math.max(0, s.rep - B.repFail);
+      s.rep = Math.max(repFloor(s), s.rep - B.repFail);
       s.today.failed++;
       s.orders = s.orders.filter((q) => q !== o);
       ev.push({ type: 'left', order: o.id });
@@ -690,7 +691,8 @@ function endDay(s: MutfakState, ev: MutfakEvent[]): void {
   s.today.rent = rent;
   s.today.stars = starsFor(s, s.today.revenue);
   s.history.push(s.today);
-  if (s.money < 0) s.bankrupt = true;
+  // bankruptcy is decided at the end of the day so the team always sees the day's result
+  if (s.money < 0 || s.rep <= 0) s.bankrupt = true;
   if (s.bankrupt || (s.mode === 'kampanya' && s.day >= B.campaignDays)) return finish(s, ev);
   s.phase = 'shop';
   s.phaseLeft = B.shopTicks;
@@ -769,13 +771,6 @@ export function step(s: MutfakState, inputs: Record<PlayerId, MutfakInput>): Mut
   if (s.phase === 'service' && s.tick >= s.nextCustomer) spawnCustomer(s, ev);
   // closing with nothing left to do: wrap up after a short grace instead of idling the full 40 s
   if (s.phase === 'close' && !s.orders.some((o) => o.st !== 'eating')) s.phaseLeft = Math.min(s.phaseLeft, B.closeGraceTicks);
-  if (s.rep <= 0) {
-    s.bankrupt = true;
-    s.orders = [];
-    s.today.stars = 0;
-    s.history.push(s.today);
-    return (finish(s, ev), ev);
-  }
   if (--s.phaseLeft > 0) return ev;
   if (s.phase === 'prep') {
     s.phase = 'service';

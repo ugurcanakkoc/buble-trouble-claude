@@ -3,7 +3,10 @@
 @media (max-height: 430px) { .mk-book { right: 138px; font-size: 17px; } }
 
 .mk-modal { background: rgba(13, 16, 32, .78); backdrop-filter: blur(2px); z-index: 40; }
-.mk-modal .card { width: min(780px, 100%); padding: 14px 16px 16px; gap: 10px; }
+.mk-modal .card { width: min(780px, 100%); padding: 14px 16px 16px; gap: 10px; max-height: calc(100dvh - 16px); }
+/* the day summary/shop scrolls inside the card so the Hazırım footer is always on screen (short phones) */
+.mk-modal .mk-cols { min-height: 0; overflow-y: auto; }
+.mk-modal .mk-foot { flex: none; }
 .mk-modal .title { font-size: clamp(24px, 6vh, 36px); }
 .mk-cols { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 12px; text-align: left; }
 .mk-box { background: #0f1330; border-radius: 14px; padding: 8px 12px; font-size: 16px; }

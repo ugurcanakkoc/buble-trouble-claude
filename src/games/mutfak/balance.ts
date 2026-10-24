@@ -68,6 +68,8 @@ export const BALANCE = {
   startRep: 50,
   repServe: 2,
   repFail: 5,
+  graceDays: 1, // açılış günü: no rent, reputation can't fall below graceRepFloor (no day-1 bankruptcy)
+  graceRepFloor: 20,
   rentBase: 150,
   rentPerDay: 25,
   targets: [400, 500, 600], // day 1..3 (1★); endless: last × 1.12^(day-3)

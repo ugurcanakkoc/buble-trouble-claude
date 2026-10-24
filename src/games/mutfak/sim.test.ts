@@ -320,7 +320,7 @@ describe('day loop & economy', () => {
     run(s, B.serviceTicks + B.closeTicks);
     expect(s.phase).toBe('shop');
     expect(s.history[0].stars).toBe(2);
-    expect(s.money).toBe(1000 - (B.rentBase + B.rentPerDay));
+    expect(s.money).toBe(1000); // açılış günü: no rent on day 1
     const money = s.money;
     run(s, 1, { p0: { ...EMPTY_INPUT, buy: 'bicak', buySeq: 1 } });
     expect(s.up.bicak).toBe(true);
@@ -330,6 +330,23 @@ describe('day loop & economy', () => {
     run(s, 1, { p0: { ...EMPTY_INPUT, buySeq: 2, ready: true } });
     expect(s.phase).toBe('prep');
     expect(s.day).toBe(2);
+  });
+
+  it('açılış günü: no day-1 bankruptcy, reputation floor; rep 0 at the end of a later day bankrupts', () => {
+    const s = createGame(5, humans(1), 'kampanya');
+    s.money = 0;
+    run(s, B.prepTicks + B.serviceTicks + B.closeTicks); // idle day 1: customers leave unserved
+    expect(s.bankrupt).toBe(false);
+    expect(s.phase).toBe('shop');
+    expect(s.rep).toBeGreaterThanOrEqual(B.graceRepFloor);
+    const d = createGame(5, humans(1), 'kampanya');
+    d.day = 2;
+    d.money = 1e6;
+    d.rep = 1;
+    run(d, B.prepTicks + B.serviceTicks); // rep hits 0 mid-day: the day still runs to the end
+    expect(d.phase).not.toBe('end');
+    run(d, B.closeTicks);
+    expect(d.bankrupt).toBe(true);
   });
 
   it('campaign ends after day 3; bankrupt when rent cannot be paid', () => {
@@ -346,6 +363,7 @@ describe('day loop & economy', () => {
 
     const b = createGame(5, humans(1), 'kampanya');
     b.money = 0;
+    b.day = 2; // rent is due from day 2
     const ev = run(b, B.prepTicks + B.serviceTicks + B.closeTicks);
     expect(b.phase).toBe('end');
     expect(b.bankrupt).toBe(true);

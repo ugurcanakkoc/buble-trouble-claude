@@ -58,7 +58,7 @@ export function mountShop(o: { selfId: string; buy(id: UpgradeId): void; toggleR
             h('h3', { text: 'Günün hesabı' }),
             h('div', { class: 'mk-sum' },
               ...[
-                ['Ciro', `${d.revenue} ₺`], ['Bahşiş', `${d.tips} ₺`], ['Kira', `−${d.rent} ₺`],
+                ['Ciro', `${d.revenue} ₺`], ['Bahşiş', `${d.tips} ₺`], ['Kira', d.rent ? `−${d.rent} ₺` : 'Yok (açılış günü)'],
                 ['Servis', String(d.served)], ['Kaybedilen', String(d.failed)], ['Kasa', `${s.money} ₺`],
               ].flatMap(([a, b]) => [h('span', { text: a }), h('span', { text: b })]),
             ),
